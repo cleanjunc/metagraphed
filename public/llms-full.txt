@@ -183,7 +183,7 @@ Prefix any `/api/v1/` or `/metagraph/` path with a network to scope it: `/api/v1
 - `GET /api/v1/providers/{slug}/endpoints` — List endpoint resources for one provider or operator.
 - `GET /api/v1/coverage` — Fetch registry coverage summary.
 - `GET /api/v1/registry/summary` — Fetch the registry-wide summary (completeness, top subnets, level counts, latest changes).
-- `GET /api/v1/lineage` — Fetch cross-network subnet lineage: mainnet ↔ testnet identity mapping (graduated subnets + the deploying-soon testnet pipeline).
+- `GET /api/v1/lineage` — Fetch maintainer-approved cross-network subnet lineage (graduated subnets + the deploying-soon testnet pipeline).
 - `GET /api/v1/fixtures` — Fetch the index of captured live request/response fixtures (which surfaces carry a sanitized sample). Fetch one with get_fixture / GET /metagraph/fixtures/{surface_id}.json.
 - `GET /api/v1/agent-resources` — Fetch the AI-resources index: the copyable agent (/agent.md), the MCP server + its tools, the skill, llms.txt, OpenAPI, and the agent-facing APIs.
 - `GET /api/v1/curation` — Fetch curation states by subnet.
