@@ -11,11 +11,17 @@
 // this module is pure and unit-testable, and so it reuses the exact same
 // R2/ASSETS resolution the REST routes use.
 import {
-  clampInt,
   DAY_MS,
   resolveClientIp,
   SS58_ADDRESS_PATTERN,
 } from "../workers/config.mjs";
+// Aliased: the file-local clampLimit below is the per-tool number-arg clamp, a
+// different contract from the shared pagination-profile clamp used here.
+import {
+  FEED_PAGINATION,
+  clampLimit as clampPageLimit,
+  clampOffset,
+} from "../workers/request-params.mjs";
 import { EXPOSED_RESPONSE_HEADERS_VALUE } from "../workers/http.mjs";
 import { CONTRACT_VERSION, PRIMARY_DOMAIN } from "./contracts.mjs";
 import {
@@ -469,8 +475,8 @@ async function loadSubnetConcentrationHistory(ctx, netuid, args) {
 // deprecated fallback. Cold D1 → event_count:0.
 async function loadSubnetEvents(ctx, netuid, { kind, limit, offset, cursor }) {
   const run = mcpD1Runner(ctx);
-  const resolvedLimit = clampInt(limit, 100, 1, 1000);
-  const resolvedOffset = clampInt(offset, 0, 0, 1_000_000);
+  const resolvedLimit = clampPageLimit(limit, FEED_PAGINATION);
+  const resolvedOffset = clampOffset(offset);
   const cur = decodeCursor(cursor, 2);
   const useCursor = Boolean(cur);
   const params = [netuid];
