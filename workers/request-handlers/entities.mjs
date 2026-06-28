@@ -108,6 +108,35 @@ function parseBoundedIntParam(url, parameter, { def, min, max }) {
   return { value };
 }
 
+// Resolve a path ref segment to a non-negative chain index, or null when it is
+// not a bare base-10 integer. Number()/parseInt would coerce hex (0x1f),
+// scientific notation (1e3), signs, and trailing garbage to a valid-looking id,
+// resolving a malformed ref to another entity instead of a schema-stable miss.
+function parseRefInt(segment) {
+  if (!/^\d+$/.test(segment)) return null;
+  const value = Number(segment);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+// Resolve a block {ref} (numeric block_number or 0x block_hash) to its stored
+// block_number via the blocks tier, or null when the ref is malformed or the
+// block is unknown. The numeric ref is parsed strictly, so a non-integer ref is
+// a miss rather than a Number()-coerced lookup of another block. Shared by the
+// block sub-resource handlers, which resolve the ref before reading their rows.
+async function resolveBlockNumber(env, ref) {
+  const isHash = /^0x[0-9a-fA-F]{64}$/.test(ref);
+  const numericRef = isHash ? null : parseRefInt(ref);
+  if (!isHash && numericRef == null) return null;
+  const rows = await d1All(
+    env,
+    isHash
+      ? `SELECT block_number FROM blocks WHERE block_hash = ? LIMIT 1`
+      : `SELECT block_number FROM blocks WHERE block_number = ? LIMIT 1`,
+    [isHash ? ref.toLowerCase() : numericRef],
+  );
+  return rows[0]?.block_number ?? null;
+}
+
 // --- Per-UID metagraph (#1304/#1305): served live from the neurons D1 tier ---
 // (migration 0007, populated by the refresh-metagraph cron). Null-safe: an
 // unbound/cold D1 returns a schema-stable empty payload, like the other
@@ -1105,6 +1134,9 @@ export async function handleBlocks(request, env, url) {
 // neuron detail route — NEVER 404/throw).
 export async function handleBlock(request, env, ref) {
   const isHash = /^0x[0-9a-fA-F]{64}$/.test(ref);
+  // A numeric ref must be bare digits; a non-integer ref is a miss (block:null),
+  // never a coerced lookup of another block.
+  const blockNumber = isHash ? null : parseRefInt(ref);
   const sql = isHash
     ? `SELECT ${BLOCK_READ_COLUMNS} FROM blocks WHERE block_hash = ? LIMIT 1`
     : `SELECT ${BLOCK_READ_COLUMNS} FROM blocks WHERE block_number = ? LIMIT 1`;
@@ -1112,8 +1144,10 @@ export async function handleBlock(request, env, ref) {
   // and D1 text columns are BINARY-collated, so a mixed/upper-case 0x ref would
   // miss. Normalize the hash ref to lowercase before binding (same for the block-
   // extrinsics, block-events, and extrinsic handlers below).
-  const param = isHash ? ref.toLowerCase() : Number(ref);
-  const rows = await d1All(env, sql, [param]);
+  const rows =
+    isHash || blockNumber != null
+      ? await d1All(env, sql, [isHash ? ref.toLowerCase() : blockNumber])
+      : [];
   // prev/next chain-walk neighbors (#1853): indexed scalar lookups for the
   // nearest STORED block numbers around the resolved height (skips pruned gaps;
   // null at the window edges). Derived from the resolved row's number (works for
@@ -1158,15 +1192,7 @@ export async function handleBlockExtrinsics(request, env, ref, url) {
   if (validationError) return analyticsQueryError(validationError);
   const limit = clampInt(url.searchParams.get("limit"), 50, 1, 100);
   const offset = clampInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
-  const isHash = /^0x[0-9a-fA-F]{64}$/.test(ref);
-  const blockRows = await d1All(
-    env,
-    isHash
-      ? `SELECT block_number FROM blocks WHERE block_hash = ? LIMIT 1`
-      : `SELECT block_number FROM blocks WHERE block_number = ? LIMIT 1`,
-    [isHash ? ref.toLowerCase() : Number(ref)],
-  );
-  const blockNumber = blockRows[0]?.block_number ?? null;
+  const blockNumber = await resolveBlockNumber(env, ref);
   const rows =
     blockNumber == null
       ? []
@@ -1201,15 +1227,7 @@ export async function handleBlockEvents(request, env, ref, url) {
   if (validationError) return analyticsQueryError(validationError);
   const limit = clampInt(url.searchParams.get("limit"), 100, 1, 1000);
   const offset = clampInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
-  const isHash = /^0x[0-9a-fA-F]{64}$/.test(ref);
-  const blockRows = await d1All(
-    env,
-    isHash
-      ? `SELECT block_number FROM blocks WHERE block_hash = ? LIMIT 1`
-      : `SELECT block_number FROM blocks WHERE block_number = ? LIMIT 1`,
-    [isHash ? ref.toLowerCase() : Number(ref)],
-  );
-  const blockNumber = blockRows[0]?.block_number ?? null;
+  const blockNumber = await resolveBlockNumber(env, ref);
   const rows =
     blockNumber == null
       ? []
@@ -1403,13 +1421,14 @@ export async function handleExtrinsic(request, env, ref) {
       [ref.toLowerCase()],
     );
   } else {
-    // Composite "<block>-<index>": coerce both halves; a non-finite half is a
-    // miss (extrinsic:null), never a bad bind.
-    const [b, i] = ref.split("-");
-    const blockNumber = Number(b);
-    const extrinsicIndex = Number(i);
+    // Composite "<block>-<index>": exactly two bare-integer halves. split("-")
+    // + Number() would otherwise resolve a malformed ref (123-45-67, 123-, -45,
+    // 0x1-2, 1e3-2) to a wrong-but-valid row instead of a miss (extrinsic:null).
+    const parts = ref.split("-");
+    const blockNumber = parts.length === 2 ? parseRefInt(parts[0]) : null;
+    const extrinsicIndex = parts.length === 2 ? parseRefInt(parts[1]) : null;
     rows =
-      Number.isInteger(blockNumber) && Number.isInteger(extrinsicIndex)
+      blockNumber != null && extrinsicIndex != null
         ? await d1All(
             env,
             `SELECT ${EXTRINSIC_READ_COLUMNS} FROM extrinsics WHERE block_number = ? AND extrinsic_index = ? LIMIT 1`,

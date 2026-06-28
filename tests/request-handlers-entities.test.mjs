@@ -1965,6 +1965,26 @@ describe("handleBlock", () => {
     assert.ok(idx !== -1, "expected a block_hash lookup");
     assert.equal(captures.params[idx][0], lowerHash);
   });
+
+  test("malformed numeric refs miss instead of resolving another block", async () => {
+    // Number() would coerce each of these (hex, scientific notation, a decimal
+    // point, or an unsafe-integer overflow) to a valid-looking block_number and
+    // resolve the seeded block; strict parsing makes them a miss without ever
+    // issuing the block_number lookup.
+    for (const ref of ["0x1f", "1e3", "12.0", "9007199254740992"]) {
+      const { env, captures } = dbWith({ blockDetail: blockRow() });
+      const body = await json(
+        await handleBlock(req(`/api/v1/blocks/${ref}`), env, ref),
+      );
+      assert.equal(body.data.block, null, `${ref} should miss`);
+      assert.ok(
+        !captures.sql.some((s) =>
+          /FROM blocks WHERE block_number = \?/.test(s),
+        ),
+        `${ref} must not issue a block_number lookup`,
+      );
+    }
+  });
 });
 
 describe("handleBlockExtrinsics", () => {
@@ -2072,6 +2092,31 @@ describe("handleBlockExtrinsics", () => {
     assert.ok(idx !== -1, "expected a block_hash resolution lookup");
     assert.equal(captures.params[idx][0], lowerHash);
   });
+
+  test("malformed numeric refs miss instead of resolving another block", async () => {
+    for (const ref of ["0x1f", "1e3", "9007199254740992"]) {
+      const { env, captures } = dbWith({
+        blockDetail: { block_number: 9 },
+        extrinsics: [extrinsicRow({ block_number: 9 })],
+      });
+      const body = await json(
+        await handleBlockExtrinsics(
+          req(`/api/v1/blocks/${ref}/extrinsics`),
+          env,
+          ref,
+          url(`/api/v1/blocks/${ref}/extrinsics`),
+        ),
+      );
+      assert.equal(body.data.block_number, null, `${ref} should miss`);
+      assert.deepEqual(body.data.extrinsics, []);
+      assert.ok(
+        !captures.sql.some((s) =>
+          /SELECT block_number FROM blocks WHERE block_number = \?/.test(s),
+        ),
+        `${ref} must not resolve a block`,
+      );
+    }
+  });
 });
 
 describe("handleBlockEvents", () => {
@@ -2161,6 +2206,31 @@ describe("handleBlockEvents", () => {
     );
     assert.ok(idx !== -1, "expected a block_hash resolution lookup");
     assert.equal(captures.params[idx][0], lowerHash);
+  });
+
+  test("malformed numeric refs miss instead of resolving another block", async () => {
+    for (const ref of ["0x1f", "1e3", "9007199254740992"]) {
+      const { env, captures } = dbWith({
+        blockDetail: { block_number: 9 },
+        blockEvents: [accountEventRow({ block_number: 9 })],
+      });
+      const body = await json(
+        await handleBlockEvents(
+          req(`/api/v1/blocks/${ref}/events`),
+          env,
+          ref,
+          url(`/api/v1/blocks/${ref}/events`),
+        ),
+      );
+      assert.equal(body.data.block_number, null, `${ref} should miss`);
+      assert.deepEqual(body.data.events, []);
+      assert.ok(
+        !captures.sql.some((s) =>
+          /SELECT block_number FROM blocks WHERE block_number = \?/.test(s),
+        ),
+        `${ref} must not resolve a block`,
+      );
+    }
   });
 });
 
@@ -2439,15 +2509,32 @@ describe("handleExtrinsic", () => {
     assert.equal(body.data.extrinsic.extrinsic_hash, null);
   });
 
-  test("malformed composite id yields extrinsic:null", async () => {
-    const body = await json(
-      await handleExtrinsic(
-        req("/api/v1/extrinsics/not-a-valid-ref"),
-        emptyEnv(),
-        "not-a-valid-ref",
-      ),
-    );
-    assert.equal(body.data.extrinsic, null);
+  test("malformed composite ids miss instead of resolving another extrinsic", async () => {
+    // split("-") + Number() would coerce each of these to a valid-looking
+    // (block, index) and resolve the seeded row; strict parsing makes them a
+    // miss without ever issuing the composite lookup.
+    for (const ref of [
+      "123-45-67",
+      "123-",
+      "-45",
+      "0x1-2",
+      "1e3-2",
+      "9007199254740992-3",
+      "3-9007199254740992",
+      "not-a-valid-ref",
+    ]) {
+      const { env, captures } = dbWith({ extrinsicDetail: extrinsicRow() });
+      const body = await json(
+        await handleExtrinsic(req(`/api/v1/extrinsics/${ref}`), env, ref),
+      );
+      assert.equal(body.data.extrinsic, null, `${ref} should miss`);
+      assert.ok(
+        !captures.sql.some((s) =>
+          /WHERE block_number = \? AND extrinsic_index = \?/.test(s),
+        ),
+        `${ref} must not issue a composite lookup`,
+      );
+    }
   });
 
   test("embeds emitted account_events when extrinsic resolves (#1849)", async () => {
