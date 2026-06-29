@@ -321,22 +321,31 @@ export async function handleSubnetConcentration(request, env, netuid, url) {
   );
 }
 
-export function canonicalSubnetHistoryCachePath(url) {
+// Shared helper: build a canonical edge-cache key for any windowed route by
+// normalising the ?window= query parameter through the route-specific parse
+// function, so that an omitted window and an explicit default-value window map
+// to the same cache slot.
+function canonicalWindowedCachePath(url, parseWindow) {
   const validationError = validateQueryParams(url, ["window"]);
   if (validationError) return `${url.pathname}${url.search}`;
-  const { label, error } = parseHistoryWindow(url.searchParams.get("window"));
+  const { label, error } = parseWindow(url.searchParams.get("window"));
   if (error) return `${url.pathname}${url.search}`;
   return `${url.pathname}?window=${encodeURIComponent(label)}`;
 }
 
+export function canonicalSubnetHistoryCachePath(url) {
+  return canonicalWindowedCachePath(url, parseHistoryWindow);
+}
+
 export function canonicalSubnetConcentrationHistoryCachePath(url) {
-  const validationError = validateQueryParams(url, ["window"]);
-  if (validationError) return `${url.pathname}${url.search}`;
-  const { label, error } = parseConcentrationHistoryWindow(
-    url.searchParams.get("window"),
-  );
-  if (error) return `${url.pathname}${url.search}`;
-  return `${url.pathname}?window=${encodeURIComponent(label)}`;
+  return canonicalWindowedCachePath(url, parseConcentrationHistoryWindow);
+}
+
+// Canonical edge-cache key for the subnet-turnover route (?window= via
+// parseHistoryWindow). Distinct from canonicalSubnetConcentrationHistoryCachePath
+// which uses a different parse function (parseConcentrationHistoryWindow).
+export function canonicalSubnetTurnoverCachePath(url) {
+  return canonicalWindowedCachePath(url, parseHistoryWindow);
 }
 
 // GET /api/v1/subnets/{netuid}/concentration/history?window=7d|30d|90d: the per-day
