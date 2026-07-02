@@ -359,6 +359,11 @@ assert.ok(
   Array.isArray(chainCalls.calls),
   "get_chain_calls must return calls[]",
 );
+const chainConc = await callOk("get_chain_concentration", {});
+assert.ok(
+  Number.isInteger(chainConc.subnet_count),
+  "get_chain_concentration must return an integer subnet_count",
+);
 const meta = await callOk("get_subnet_metagraph", { netuid: 7 });
 assert.ok(
   Array.isArray(meta.neurons),
