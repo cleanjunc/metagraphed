@@ -14531,6 +14531,124 @@ describe("MCP parity tools — provider + discovery bundle (artifact-backed)", (
     assert.equal(out.generated_at, "2026-01-01T00:00:00Z");
   });
 
+  test("list_rpc_pools overlays live RPC pool eligibility", async () => {
+    const deps = makeDeps(
+      {
+        "/metagraph/rpc/pools.json": {
+          generated_at: "2026-01-01T00:00:00Z",
+          source: "build-prober",
+          pools: [
+            {
+              network: "finney",
+              endpoints: [
+                {
+                  id: "attacker-wrong-chain",
+                  status: "ok",
+                  health_source: "build-prober",
+                  pool_eligible: true,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        [KV_HEALTH_RPC_POOL]: {
+          last_run_at: "2026-01-01T00:15:00Z",
+          endpoints: [
+            {
+              id: "attacker-wrong-chain",
+              status: "ok",
+              classification: "wrong-chain",
+              latency_ms: 321,
+              latest_block: 12345,
+            },
+          ],
+        },
+      },
+    );
+    const res = await callTool("list_rpc_pools", {}, { deps });
+    const out = res.body.result.structuredContent;
+    const endpoint = out.pools[0].endpoints[0];
+    assert.equal(out.source, "live-cron-prober");
+    assert.equal(out.operational_observed_at, "2026-01-01T00:15:00Z");
+    assert.equal(endpoint.pool_eligible, false);
+    assert.equal(endpoint.health_source, "live-cron-prober");
+    assert.equal(endpoint.latency_ms, 321);
+    assert.equal(endpoint.latest_block, 12345);
+  });
+
+  test("list_rpc_pools falls back to the static pools when no readHealthKv dep is provided", async () => {
+    const depsNoKvFn = {
+      readArtifact() {
+        return Promise.resolve({
+          ok: true,
+          data: {
+            generated_at: "2026-01-01T00:00:00Z",
+            source: "build-prober",
+            pools: [{ network: "finney", endpoints: [] }],
+          },
+        });
+      },
+    };
+    const res = await callTool("list_rpc_pools", {}, { deps: depsNoKvFn });
+    const out = res.body.result.structuredContent;
+    assert.equal(out.source, "build-prober");
+  });
+
+  test("list_rpc_pools falls back to the static pools when the live snapshot has no endpoints array", async () => {
+    const deps = makeDeps(
+      {
+        "/metagraph/rpc/pools.json": {
+          generated_at: "2026-01-01T00:00:00Z",
+          source: "build-prober",
+          pools: [{ network: "finney", endpoints: [] }],
+        },
+      },
+      { [KV_HEALTH_RPC_POOL]: { last_run_at: "2026-01-01T00:15:00Z" } },
+    );
+    const res = await callTool("list_rpc_pools", {}, { deps });
+    const out = res.body.result.structuredContent;
+    assert.equal(out.source, "build-prober");
+  });
+
+  test("list_rpc_pools falls back to the static artifact when its pools field is not an array", async () => {
+    const deps = makeDeps(
+      {
+        "/metagraph/rpc/pools.json": {
+          generated_at: "2026-01-01T00:00:00Z",
+          source: "build-prober",
+          pools: { 0: { network: "finney", endpoints: [] } },
+        },
+      },
+      {
+        [KV_HEALTH_RPC_POOL]: {
+          last_run_at: "2026-01-01T00:15:00Z",
+          endpoints: [{ id: "a", status: "ok" }],
+        },
+      },
+    );
+    const res = await callTool("list_rpc_pools", {}, { deps });
+    const out = res.body.result.structuredContent;
+    assert.equal(out.source, "build-prober");
+  });
+
+  test("list_rpc_pools reports operational_observed_at:null when the live snapshot has no last_run_at", async () => {
+    const deps = makeDeps(
+      {
+        "/metagraph/rpc/pools.json": {
+          generated_at: "2026-01-01T00:00:00Z",
+          pools: [{ network: "finney", endpoints: [] }],
+        },
+      },
+      { [KV_HEALTH_RPC_POOL]: { endpoints: [{ id: "a", status: "ok" }] } },
+    );
+    const res = await callTool("list_rpc_pools", {}, { deps });
+    const out = res.body.result.structuredContent;
+    assert.equal(out.source, "live-cron-prober");
+    assert.equal(out.operational_observed_at, null);
+  });
+
   test("list_rpc_pools rejects an unexpected argument", async () => {
     const res = await callTool("list_rpc_pools", { netuid: 7 });
     assert.equal(res.body.result.isError, true);
