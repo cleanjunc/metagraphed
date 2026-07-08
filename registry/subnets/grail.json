@@ -149,6 +149,33 @@
         "https://github.com/one-covenant/grail/blob/main/README.md"
       ],
       "url": "https://raw.githubusercontent.com/one-covenant/grail/main/compute.min.yaml"
+    },
+    {
+      "auth_required": false,
+      "authority": "community",
+      "id": "sn-81-grail-grafana-openapi",
+      "kind": "openapi",
+      "name": "Grail Grafana HTTP API OpenAPI",
+      "notes": "Public no-auth OpenAPI 3 schema (title \"Grafana HTTP API.\") served at grail-grafana.tplr.ai/public/openapi3.json — the same host already registered as this file's dashboard and subnet-api (health) surfaces. Same operator (one-covenant / tplr.ai) and identical publish convention already accepted for the sibling Templar (SN3) subnet's Grafana OpenAPI surface (grafana.tplr.ai/public/openapi3.json).",
+      "provider": "one-covenant",
+      "public_safe": true,
+      "schema_status": "machine-readable",
+      "schema_url": "https://grail-grafana.tplr.ai/public/openapi3.json",
+      "source_urls": [
+        "https://grail-grafana.tplr.ai/",
+        "https://github.com/one-covenant/grail"
+      ],
+      "probe": {
+        "enabled": true,
+        "method": "GET",
+        "expect": "json",
+        "timeout_ms": 15000
+      },
+      "review": {
+        "state": "community-submitted",
+        "submitted_by": "galuis116"
+      },
+      "url": "https://grail-grafana.tplr.ai/public/openapi3.json"
     }
   ]
 }
