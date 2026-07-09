@@ -85,6 +85,24 @@
         "https://github.com/byzantiumaitao-arch/byzantium/blob/main/ai-agent-kit/byzantium.config.json"
       ],
       "url": "https://raw.githubusercontent.com/byzantiumaitao-arch/byzantium/main/ai-agent-kit/byzantium.config.json"
+    },
+    {
+      "auth_required": false,
+      "authority": "community",
+      "id": "sn-76-byzantium-validator-weights",
+      "kind": "subnet-api",
+      "name": "Byzantium validator weights API",
+      "notes": "Public no-auth JSON feed of per-miner weight values; the subnet's sole public validator endpoint per its route.ts doc-comment.",
+      "provider": "byzantium",
+      "public_safe": true,
+      "review": {
+        "state": "community-submitted",
+        "submitted_by": "cleanjunc"
+      },
+      "source_urls": [
+        "https://raw.githubusercontent.com/byzantiumaitao-arch/byzantium/main/link-service/app/api/validator/weights/route.ts"
+      ],
+      "url": "https://link.byzantiumai.net/api/validator/weights"
     }
   ],
   "website_url": "https://www.byzantiumai.net/"
