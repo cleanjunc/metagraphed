@@ -2616,6 +2616,70 @@ export interface ChainAxonRemovals {
   subnets: ChainAxonRemovalSubnet[];
 }
 
+/** One subnet's row on the network-wide axon-serving leaderboard. */
+export interface ChainServingSubnet {
+  netuid: number;
+  distinct_servers: number;
+  announcements: number;
+  announcements_per_server: number | null;
+}
+
+/** Network-wide axon-serving rollup — true distinct-server count (not a per-subnet sum) + total announcements. */
+export interface ChainServingNetwork {
+  distinct_servers: number;
+  announcements: number;
+  announcements_per_server: number | null;
+}
+
+/**
+ * Network-wide axon-serving leaderboard over a 7d/30d window, from
+ * GET /api/v1/chain/serving — subnets ranked by AxonServed announcement count,
+ * plus the true network-wide distinct-server rollup and a distribution summary of
+ * the per-subnet re-announcement intensity. The serving-side complement of the
+ * axon-teardown ("churn") leaderboard. Zeroed with an empty subnets list when cold.
+ */
+export interface ChainServing {
+  schema_version: number;
+  window: string | null;
+  observed_at: string | null;
+  subnet_count: number;
+  network: ChainServingNetwork;
+  intensity_distribution: ChainIntensityDistribution | null;
+  subnets: ChainServingSubnet[];
+}
+
+/** One subnet's row on the network-wide Prometheus-telemetry leaderboard. */
+export interface ChainPrometheusSubnet {
+  netuid: number;
+  distinct_exporters: number;
+  announcements: number;
+  announcements_per_exporter: number | null;
+}
+
+/** Network-wide Prometheus-telemetry rollup — true distinct-exporter count (not a per-subnet sum) + total announcements. */
+export interface ChainPrometheusNetwork {
+  distinct_exporters: number;
+  announcements: number;
+  announcements_per_exporter: number | null;
+}
+
+/**
+ * Network-wide Prometheus-telemetry leaderboard over a 7d/30d window, from
+ * GET /api/v1/chain/prometheus — subnets ranked by PrometheusServed announcement
+ * count, plus the true network-wide distinct-exporter rollup and a distribution
+ * summary of the per-subnet re-announcement intensity. The observability-endpoint
+ * sibling of the axon-serving leaderboard. Zeroed with an empty subnets list when cold.
+ */
+export interface ChainPrometheus {
+  schema_version: number;
+  window: string | null;
+  observed_at: string | null;
+  subnet_count: number;
+  network: ChainPrometheusNetwork;
+  intensity_distribution: ChainIntensityDistribution | null;
+  subnets: ChainPrometheusSubnet[];
+}
+
 /** One subnet's row on the network-wide neuron-deregistration leaderboard (#3466). */
 export interface ChainDeregistrationsSubnet {
   netuid: number;

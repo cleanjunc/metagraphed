@@ -30,6 +30,8 @@ import {
   chainTurnoverQuery,
   chainStakeTransfersQuery,
   chainAxonRemovalsQuery,
+  chainServingQuery,
+  chainPrometheusQuery,
   chainTransferPairsQuery,
   chainTransfersQuery,
   economicsTrendsQuery,
@@ -48,6 +50,8 @@ import type {
   ChainAxonRemovals,
   ChainRegistrations,
   ChainTransfers,
+  ChainServing,
+  ChainPrometheus,
 } from "@/lib/metagraphed/types";
 
 const explorerSearchSchema = z.object({
@@ -115,6 +119,8 @@ function ExplorerPage() {
           "/api/v1/chain/turnover",
           "/api/v1/chain/stake-transfers",
           "/api/v1/chain/axon-removals",
+          "/api/v1/chain/serving",
+          "/api/v1/chain/prometheus",
           "/api/v1/chain-events",
           "/api/v1/chain-events/stats",
           "/api/v1/economics/trends",
@@ -516,6 +522,149 @@ function StakeMovesSection({ moves }: { moves: ChainStakeMoves }) {
           in the busiest subnet, across {formatNumber(dist.count)} subnets.
         </p>
       ) : null}
+    </section>
+  );
+}
+
+/** One row on a network-operations leaderboard, shape-normalized across the
+ * axon-serving and Prometheus-telemetry boards (which differ only in the
+ * endpoint-count field name). */
+interface OpsRow {
+  netuid: number;
+  announcements: number;
+  endpoints: number;
+  perEndpoint: number | null;
+}
+
+/**
+ * One network-operations leaderboard column — a network rollup line above a
+ * per-subnet table ranked by announcement volume, each row linking to its subnet
+ * page. Shared by the axon-serving and Prometheus-telemetry boards, which differ
+ * only in the endpoint-count label and the per-endpoint intensity ratio.
+ */
+function OpsLeaderboard({
+  title,
+  rollup,
+  endpointLabel,
+  ratioLabel,
+  rows,
+  empty,
+}: {
+  title: string;
+  rollup: string;
+  endpointLabel: string;
+  ratioLabel: string;
+  rows: OpsRow[];
+  empty: string;
+}) {
+  return (
+    <div>
+      <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-muted">
+        {title}
+      </div>
+      <p className="mb-3 font-mono text-[11px] text-ink-muted">{rollup}</p>
+      {rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr>
+                <th className={TH}>Subnet</th>
+                <th className={`${TH} text-right`}>Announcements</th>
+                <th className={`${TH} text-right`}>{endpointLabel}</th>
+                <th className={`${TH} text-right`}>{ratioLabel}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map((s) => (
+                <tr key={s.netuid} className="hover:bg-surface/40">
+                  <td className="px-4 py-2 font-mono text-[11px]">
+                    <Link
+                      to="/subnets/$netuid"
+                      params={{ netuid: s.netuid }}
+                      className="text-ink-strong hover:text-accent hover:underline"
+                    >
+                      SN{s.netuid}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono text-[11px] tabular-nums text-ink">
+                    {formatNumber(s.announcements)}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono text-[11px] tabular-nums text-ink-muted">
+                    {formatNumber(s.endpoints)}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono text-[11px] tabular-nums text-ink-muted">
+                    {s.perEndpoint != null ? s.perEndpoint.toFixed(2) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="font-mono text-[12px] text-ink-muted">{empty}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Network operations — the network-wide axon-serving and Prometheus-telemetry
+ * leaderboards side by side, each ranked by announcement volume with its own
+ * network rollup. Chain-direct: GET /api/v1/chain/serving and
+ * GET /api/v1/chain/prometheus. The teardown-side complement is the Axon churn
+ * leaderboard below.
+ */
+function NetworkOperationsSection({
+  serving,
+  prometheus,
+}: {
+  serving: ChainServing;
+  prometheus: ChainPrometheus;
+}) {
+  return (
+    <section className="rounded-lg border border-border bg-card p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-muted">
+          Network operations
+        </h2>
+        <span className="font-mono text-[11px] text-ink-muted">
+          {formatNumber(serving.subnet_count)} serving · {formatNumber(prometheus.subnet_count)}{" "}
+          telemetry
+        </span>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <OpsLeaderboard
+          title="Axon serving"
+          rollup={`${formatNumber(serving.network.announcements)} announcements across ${formatNumber(
+            serving.network.distinct_servers,
+          )} servers`}
+          endpointLabel="Distinct servers"
+          ratioLabel="Per server"
+          rows={serving.subnets.map((s) => ({
+            netuid: s.netuid,
+            announcements: s.announcements,
+            endpoints: s.distinct_servers,
+            perEndpoint: s.announcements_per_server,
+          }))}
+          empty="No serving activity in this window yet."
+        />
+        <OpsLeaderboard
+          title="Prometheus telemetry"
+          rollup={`${formatNumber(prometheus.network.announcements)} announcements across ${formatNumber(
+            prometheus.network.distinct_exporters,
+          )} exporters`}
+          endpointLabel="Distinct exporters"
+          ratioLabel="Per exporter"
+          rows={prometheus.subnets.map((s) => ({
+            netuid: s.netuid,
+            announcements: s.announcements,
+            endpoints: s.distinct_exporters,
+            perEndpoint: s.announcements_per_exporter,
+          }))}
+          empty="No Prometheus telemetry in this window yet."
+        />
+      </div>
     </section>
   );
 }
@@ -981,6 +1130,8 @@ function ExplorerDashboard() {
     { data: turnoverRes },
     { data: stakeTransfersRes },
     { data: axonChurnRes },
+    { data: servingRes },
+    { data: prometheusRes },
     { data: eventMixRes },
     { data: trendsRes },
     { data: transfersRes },
@@ -997,6 +1148,8 @@ function ExplorerDashboard() {
       chainTurnoverQuery(win),
       chainStakeTransfersQuery(win),
       chainAxonRemovalsQuery(win),
+      chainServingQuery(win),
+      chainPrometheusQuery(win),
       chainEventsStatsQuery(),
       economicsTrendsQuery(win),
       chainTransfersQuery(win),
@@ -1013,6 +1166,8 @@ function ExplorerDashboard() {
   const turnover = turnoverRes.data;
   const stakeTransfers = stakeTransfersRes.data;
   const axonChurn = axonChurnRes.data;
+  const serving = servingRes.data;
+  const prometheus = prometheusRes.data;
   const eventMix = eventMixRes.data;
   const trends = trendsRes.data;
   const transfers = transfersRes.data;
@@ -1442,6 +1597,8 @@ function ExplorerDashboard() {
           <EmptyState title="No stake transfers in this window yet." />
         )}
       </section>
+
+      <NetworkOperationsSection serving={serving} prometheus={prometheus} />
 
       <AxonChurnSection churn={axonChurn} />
 

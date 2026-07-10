@@ -90,6 +90,10 @@ import type {
   ChainStakeTransferSubnet,
   ChainAxonRemovals,
   ChainAxonRemovalSubnet,
+  ChainServing,
+  ChainServingSubnet,
+  ChainPrometheus,
+  ChainPrometheusSubnet,
   ChainDeregistrations,
   ChainDeregistrationsSubnet,
   ChainRegistrations,
@@ -273,6 +277,8 @@ const MAX_CHAIN_STAKE_TRANSFERS = 100;
 const MAX_CHAIN_AXON_REMOVALS = 100;
 const MAX_CHAIN_DEREGISTRATIONS = 100;
 const MAX_CHAIN_REGISTRATIONS = 100;
+const MAX_CHAIN_SERVING = 100;
+const MAX_CHAIN_PROMETHEUS = 100;
 
 function coerceFiniteNumber(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -3765,6 +3771,108 @@ export const chainAxonRemovalsQuery = (window = "7d", limit = 20) =>
       };
     },
     staleTime: STALE_MED,
+  });
+
+function normalizeChainServingSubnet(raw: unknown): ChainServingSubnet | null {
+  if (!isRecord(raw)) return null;
+  const netuid = firstFiniteNumber(raw.netuid);
+  if (netuid == null) return null;
+  return {
+    netuid,
+    distinct_servers: firstFiniteNumber(raw.distinct_servers) ?? 0,
+    announcements: firstFiniteNumber(raw.announcements) ?? 0,
+    announcements_per_server: firstFiniteNumber(raw.announcements_per_server) ?? null,
+  };
+}
+
+// Network-wide axon-serving leaderboard over a 7d/30d window — the serving-side
+// complement of chainAxonRemovals (teardown churn). Every numeric cell coerces
+// defensively: counts fall through to 0, averages to null (never NaN), and
+// malformed subnet rows are dropped on a cold store or junk.
+export function normalizeChainServing(raw: unknown): ChainServing {
+  const rec = isRecord(raw) ? raw : {};
+  const networkRec = isRecord(rec.network) ? rec.network : {};
+  return {
+    schema_version: firstFiniteNumber(rec.schema_version) ?? 1,
+    window: firstString(rec.window) ?? null,
+    observed_at: firstString(rec.observed_at) ?? null,
+    subnet_count: firstFiniteNumber(rec.subnet_count) ?? 0,
+    network: {
+      distinct_servers: firstFiniteNumber(networkRec.distinct_servers) ?? 0,
+      announcements: firstFiniteNumber(networkRec.announcements) ?? 0,
+      announcements_per_server: firstFiniteNumber(networkRec.announcements_per_server) ?? null,
+    },
+    intensity_distribution: normalizeChainIntensityDistribution(rec.intensity_distribution),
+    subnets: normalizeChainRows(rec.subnets, MAX_CHAIN_SERVING, normalizeChainServingSubnet),
+  };
+}
+
+export const chainServingQuery = (window: ChainWindow = "7d") =>
+  queryOptions({
+    queryKey: k("chain-serving", window),
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch<Partial<ChainServing>>("/api/v1/chain/serving", {
+        params: { window, limit: 20 },
+        signal,
+      });
+      return {
+        data: normalizeChainServing(res.data),
+        meta: res.meta,
+        url: res.url,
+      };
+    },
+    staleTime: STALE_SHORT,
+  });
+
+function normalizeChainPrometheusSubnet(raw: unknown): ChainPrometheusSubnet | null {
+  if (!isRecord(raw)) return null;
+  const netuid = firstFiniteNumber(raw.netuid);
+  if (netuid == null) return null;
+  return {
+    netuid,
+    distinct_exporters: firstFiniteNumber(raw.distinct_exporters) ?? 0,
+    announcements: firstFiniteNumber(raw.announcements) ?? 0,
+    announcements_per_exporter: firstFiniteNumber(raw.announcements_per_exporter) ?? null,
+  };
+}
+
+// Network-wide Prometheus-telemetry leaderboard over a 7d/30d window — the
+// observability-endpoint sibling of the axon-serving board. Same defensive
+// coercion: counts fall through to 0, averages to null (never NaN), and
+// malformed subnet rows are dropped on a cold store or junk.
+export function normalizeChainPrometheus(raw: unknown): ChainPrometheus {
+  const rec = isRecord(raw) ? raw : {};
+  const networkRec = isRecord(rec.network) ? rec.network : {};
+  return {
+    schema_version: firstFiniteNumber(rec.schema_version) ?? 1,
+    window: firstString(rec.window) ?? null,
+    observed_at: firstString(rec.observed_at) ?? null,
+    subnet_count: firstFiniteNumber(rec.subnet_count) ?? 0,
+    network: {
+      distinct_exporters: firstFiniteNumber(networkRec.distinct_exporters) ?? 0,
+      announcements: firstFiniteNumber(networkRec.announcements) ?? 0,
+      announcements_per_exporter: firstFiniteNumber(networkRec.announcements_per_exporter) ?? null,
+    },
+    intensity_distribution: normalizeChainIntensityDistribution(rec.intensity_distribution),
+    subnets: normalizeChainRows(rec.subnets, MAX_CHAIN_PROMETHEUS, normalizeChainPrometheusSubnet),
+  };
+}
+
+export const chainPrometheusQuery = (window: ChainWindow = "7d") =>
+  queryOptions({
+    queryKey: k("chain-prometheus", window),
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch<Partial<ChainPrometheus>>("/api/v1/chain/prometheus", {
+        params: { window, limit: 20 },
+        signal,
+      });
+      return {
+        data: normalizeChainPrometheus(res.data),
+        meta: res.meta,
+        url: res.url,
+      };
+    },
+    staleTime: STALE_SHORT,
   });
 
 function normalizeChainDeregistrationsSubnet(raw: unknown): ChainDeregistrationsSubnet | null {
