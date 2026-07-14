@@ -112,6 +112,31 @@
         "submitted_by": "davion-knight"
       },
       "url": "https://raw.githubusercontent.com/backend-developers-ltd/InfiniteHash/b0313ed2edc8c07c8312effb108e9cadd580e314/app/src/infinite_hashes/testutils/simulator/runtime_version_318.json"
+    },
+    {
+      "auth_required": false,
+      "authority": "community",
+      "id": "sn-89-infinitehash-miner-constants",
+      "kind": "data-artifact",
+      "name": "InfiniteHash miner system constants",
+      "notes": "Public no-auth machine-readable system-constants module (app/src/infinite_hashes/aps_miner/constants.py) published in the official backend-developers-ltd/InfiniteHash repository, defining SN89 InfiniteHash miner operational parameters: block time, auction ILP/CBC max nodes and max price multiplier, scheduler intervals (commitment/auction/job timeouts), and window-transition thresholds. These are the non-user-configurable system-level values the miner runs against. Pinned to an immutable commit. Verified 200, SS58-clean, no keys or secrets. Distinct from the validator runtime-version spec already registered.",
+      "provider": "infinitehash",
+      "public_safe": true,
+      "source_urls": [
+        "https://github.com/backend-developers-ltd/InfiniteHash/blob/b0313ed2edc8c07c8312effb108e9cadd580e314/app/src/infinite_hashes/aps_miner/constants.py",
+        "https://github.com/backend-developers-ltd/InfiniteHash"
+      ],
+      "probe": {
+        "enabled": true,
+        "method": "GET",
+        "expect": "any",
+        "timeout_ms": 10000
+      },
+      "review": {
+        "state": "community-submitted",
+        "submitted_by": "ultrahighsuper"
+      },
+      "url": "https://raw.githubusercontent.com/backend-developers-ltd/InfiniteHash/b0313ed2edc8c07c8312effb108e9cadd580e314/app/src/infinite_hashes/aps_miner/constants.py"
     }
   ],
   "website_url": "https://infinitehash.xyz/",
