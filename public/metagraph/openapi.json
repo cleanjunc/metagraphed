@@ -20613,7 +20613,11 @@
             ]
           },
           "schema_url": {
+            "examples": [
+              "https://example.com/openapi.json"
+            ],
             "format": "uri",
+            "pattern": "^(?:[Hh][Tt][Tt][Pp][Ss]?|[Ww][Ss][Ss]?)://",
             "type": "string"
           },
           "source_urls": {
@@ -20637,7 +20641,11 @@
             "type": "string"
           },
           "url": {
+            "examples": [
+              "https://example.com"
+            ],
             "format": "uri",
+            "pattern": "^(?:[Hh][Tt][Tt][Pp][Ss]?|[Ww][Ss][Ss]?)://",
             "type": "string"
           },
           "verification": {

@@ -7627,7 +7627,10 @@ export interface components {
             };
             /** @enum {unknown} */
             schema_status?: "machine-readable" | "ui-only" | "not-captured";
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @example https://example.com/openapi.json
+             */
             schema_url?: string;
             source_urls?: string[];
             /** @description Freshness TTL (#1006): true when last_verified_at is older than the per-kind window (callable surfaces ~30d, identity surfaces ~90-120d), measured against the dataset's native-snapshot captured_at. false when fresh or unverified. */
@@ -7635,7 +7638,10 @@ export interface components {
             status?: components["schemas"]["HealthStatus"];
             subnet_name?: string;
             subnet_slug?: string;
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @example https://example.com
+             */
             url: string;
             verification?: {
                 archived?: boolean;

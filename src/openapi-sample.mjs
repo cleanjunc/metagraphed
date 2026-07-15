@@ -56,6 +56,10 @@ function valueForPattern(pattern, name = "") {
       // http(s)-only guard (e.g. provider logo_url) — keep the sample a valid
       // absolute URL so it satisfies both the pattern and format: uri.
       return "https://api.metagraph.sh/example";
+    case "^(?:[Hh][Tt][Tt][Pp][Ss]?|[Ww][Ss][Ss]?)://":
+      // http(s)/ws(s) guard (Surface.url/schema_url — a surface may point at a
+      // WebSocket RPC endpoint) — keep the sample a valid absolute URL.
+      return "https://api.metagraph.sh/example";
     default:
       return "example";
   }

@@ -63,7 +63,9 @@
     },
     "url": {
       "type": "string",
-      "format": "uri"
+      "format": "uri",
+      "pattern": "^(?:[Hh][Tt][Tt][Pp][Ss]?|[Ww][Ss][Ss]?)://",
+      "examples": ["https://example.com"]
     },
     "source_url": {
       "type": "string",
