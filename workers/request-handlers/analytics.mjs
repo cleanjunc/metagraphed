@@ -1469,74 +1469,102 @@ export async function handleChainAlphaVolume(request, env, url, ctx = {}) {
     : response;
 }
 
+// Factory for the chain-events analytics handlers below: each GET /api/v1/chain/<kind> endpoint
+// takes the same window + limit + format params, normalizes HEAD probes through the GET cache key
+// so they cannot bypass the edge cache and repeatedly force the network-wide aggregation, resolves
+// via the Postgres tier with a D1 fallback, and returns either the row-shaped CSV leaderboard or
+// the standard envelope. The control flow is identical across all nine; they differ only in the
+// limit-config pair, the loader, the cache/CSV slug, the CSV row key + columns, and the artifact
+// path. The leaderboards are all fixed to most-active-first by their loader. `csvRows` names the
+// key on the loaded payload holding the row-shaped leaderboard ("subnets" for the per-subnet
+// rollups, "setters" for the per-validator one).
+function makeChainEventHandler({
+  limitDefault,
+  limitMax,
+  load,
+  cacheKey,
+  csvRows,
+  csvColumns,
+  artifactPath,
+}) {
+  return async function handleChainEvent(request, env, url, ctx = {}) {
+    const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
+    if (error) return analyticsQueryError(error);
+    const formatError = validateFormatParam(url);
+    if (formatError) return analyticsQueryError(formatError);
+    const { limit, error: limitError } = parseLimitParam(url, {
+      defaultLimit: limitDefault,
+      maxLimit: limitMax,
+    });
+    if (limitError) return analyticsQueryError(limitError);
+    const csv = csvRequested(url, request);
+
+    const cacheRequest =
+      request.method === "HEAD"
+        ? new Request(request, { method: "GET" })
+        : request;
+    const response = await withEdgeCache(
+      cacheRequest,
+      ctx,
+      env,
+      cacheKey,
+      async () => {
+        const data =
+          (await tryPostgresTier(
+            env,
+            cacheRequest,
+            "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
+          )) ??
+          (await load(d1Runner(env), {
+            windowLabel: label,
+            windowDays: days,
+            limit,
+          }));
+        // CSV exports the row-shaped leaderboard; the network rollup +
+        // intensity_distribution stay JSON-only.
+        if (csv) {
+          return csvResponse(
+            data[csvRows],
+            cacheKey,
+            "short",
+            cacheRequest,
+            csvColumns,
+          );
+        }
+        return envelopeResponse(
+          cacheRequest,
+          {
+            data,
+            meta: await analyticsMeta(env, artifactPath, data.observed_at),
+          },
+          "short",
+        );
+      },
+      `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
+    );
+    return request.method === "HEAD"
+      ? new Response(null, {
+          status: response.status,
+          headers: response.headers,
+        })
+      : response;
+  };
+}
+
 // GET /api/v1/chain/weights: network-wide validator weight-setting activity across every subnet
 // over a 7d/30d window, read from the account_events WeightsSet stream. Mirrors chain-transfers:
 // window + limit params, HEAD probes normalized through the GET cache key so they cannot bypass
 // the edge cache and repeatedly force the network-wide aggregations, cache keyed on the analytics
 // cron freshness. The leaderboard is fixed to most-active-first (total WeightsSet events).
-export async function handleChainWeights(request, env, url, ctx = {}) {
-  const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
-  if (error) return analyticsQueryError(error);
-  const formatError = validateFormatParam(url);
-  if (formatError) return analyticsQueryError(formatError);
-  const { limit, error: limitError } = parseLimitParam(url, {
-    defaultLimit: CHAIN_WEIGHTS_LIMIT_DEFAULT,
-    maxLimit: CHAIN_WEIGHTS_LIMIT_MAX,
-  });
-  if (limitError) return analyticsQueryError(limitError);
-  const csv = csvRequested(url, request);
-
-  const cacheRequest =
-    request.method === "HEAD"
-      ? new Request(request, { method: "GET" })
-      : request;
-  const response = await withEdgeCache(
-    cacheRequest,
-    ctx,
-    env,
-    "chain-weights",
-    async () => {
-      const data =
-        (await tryPostgresTier(
-          env,
-          cacheRequest,
-          "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
-        )) ??
-        (await loadChainWeights(d1Runner(env), {
-          windowLabel: label,
-          windowDays: days,
-          limit,
-        }));
-      // CSV exports the row-shaped per-subnet leaderboard; the network rollup +
-      // intensity_distribution stay JSON-only (mirrors chain-stake-flow).
-      if (csv) {
-        return csvResponse(
-          data.subnets,
-          "chain-weights",
-          "short",
-          cacheRequest,
-          CHAIN_WEIGHTS_CSV_COLUMNS,
-        );
-      }
-      return envelopeResponse(
-        cacheRequest,
-        {
-          data,
-          meta: await analyticsMeta(
-            env,
-            "/metagraph/chain/weights.json",
-            data.observed_at,
-          ),
-        },
-        "short",
-      );
-    },
-    `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
-  );
-  return request.method === "HEAD"
-    ? new Response(null, { status: response.status, headers: response.headers })
-    : response;
-}
+export const handleChainWeights = makeChainEventHandler({
+  limitDefault: CHAIN_WEIGHTS_LIMIT_DEFAULT,
+  limitMax: CHAIN_WEIGHTS_LIMIT_MAX,
+  load: loadChainWeights,
+  cacheKey: "chain-weights",
+  csvRows: "subnets",
+  csvColumns: CHAIN_WEIGHTS_CSV_COLUMNS,
+  artifactPath: "/metagraph/chain/weights.json",
+});
 
 // GET /api/v1/chain/weights/setters: the network-wide weight-setter leaderboard — the individual
 // validators driving consensus across every subnet, read from the account_events WeightsSet
@@ -1545,205 +1573,45 @@ export async function handleChainWeights(request, env, url, ctx = {}) {
 // limit params, HEAD probes normalized through the GET cache key so they cannot bypass the edge
 // cache and repeatedly force the network-wide aggregation. The leaderboard is fixed to
 // most-active-first (total WeightsSet events).
-export async function handleChainWeightSetters(request, env, url, ctx = {}) {
-  const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
-  if (error) return analyticsQueryError(error);
-  const formatError = validateFormatParam(url);
-  if (formatError) return analyticsQueryError(formatError);
-  const { limit, error: limitError } = parseLimitParam(url, {
-    defaultLimit: CHAIN_WEIGHT_SETTERS_LIMIT_DEFAULT,
-    maxLimit: CHAIN_WEIGHT_SETTERS_LIMIT_MAX,
-  });
-  if (limitError) return analyticsQueryError(limitError);
-  const csv = csvRequested(url, request);
-
-  const cacheRequest =
-    request.method === "HEAD"
-      ? new Request(request, { method: "GET" })
-      : request;
-  const response = await withEdgeCache(
-    cacheRequest,
-    ctx,
-    env,
-    "chain-weight-setters",
-    async () => {
-      const data =
-        (await tryPostgresTier(
-          env,
-          cacheRequest,
-          "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
-        )) ??
-        (await loadChainWeightSetters(d1Runner(env), {
-          windowLabel: label,
-          windowDays: days,
-          limit,
-        }));
-      if (csv) {
-        return csvResponse(
-          data.setters,
-          "chain-weight-setters",
-          "short",
-          cacheRequest,
-          CHAIN_WEIGHT_SETTERS_CSV_COLUMNS,
-        );
-      }
-      return envelopeResponse(
-        cacheRequest,
-        {
-          data,
-          meta: await analyticsMeta(
-            env,
-            "/metagraph/chain/weights/setters.json",
-            data.observed_at,
-          ),
-        },
-        "short",
-      );
-    },
-    `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
-  );
-  return request.method === "HEAD"
-    ? new Response(null, { status: response.status, headers: response.headers })
-    : response;
-}
+export const handleChainWeightSetters = makeChainEventHandler({
+  limitDefault: CHAIN_WEIGHT_SETTERS_LIMIT_DEFAULT,
+  limitMax: CHAIN_WEIGHT_SETTERS_LIMIT_MAX,
+  load: loadChainWeightSetters,
+  cacheKey: "chain-weight-setters",
+  csvRows: "setters",
+  csvColumns: CHAIN_WEIGHT_SETTERS_CSV_COLUMNS,
+  artifactPath: "/metagraph/chain/weights/setters.json",
+});
 
 // GET /api/v1/chain/serving: network-wide axon-serving announcement activity across every subnet
 // over a 7d/30d window, read from the account_events AxonServed stream. Mirrors chain-transfers:
 // window + limit params, HEAD probes normalized through the GET cache key so they cannot bypass
 // the edge cache and repeatedly force the network-wide aggregations, cache keyed on the analytics
 // cron freshness. The leaderboard is fixed to most-active-first (total AxonServed events).
-export async function handleChainServing(request, env, url, ctx = {}) {
-  const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
-  if (error) return analyticsQueryError(error);
-  const formatError = validateFormatParam(url);
-  if (formatError) return analyticsQueryError(formatError);
-  const { limit, error: limitError } = parseLimitParam(url, {
-    defaultLimit: CHAIN_SERVING_LIMIT_DEFAULT,
-    maxLimit: CHAIN_SERVING_LIMIT_MAX,
-  });
-  if (limitError) return analyticsQueryError(limitError);
-  const csv = csvRequested(url, request);
-
-  const cacheRequest =
-    request.method === "HEAD"
-      ? new Request(request, { method: "GET" })
-      : request;
-  const response = await withEdgeCache(
-    cacheRequest,
-    ctx,
-    env,
-    "chain-serving",
-    async () => {
-      const data =
-        (await tryPostgresTier(
-          env,
-          cacheRequest,
-          "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
-        )) ??
-        (await loadChainServing(d1Runner(env), {
-          windowLabel: label,
-          windowDays: days,
-          limit,
-        }));
-      // CSV exports the row-shaped per-subnet leaderboard; the network rollup +
-      // intensity_distribution stay JSON-only (mirrors chain-weights).
-      if (csv) {
-        return csvResponse(
-          data.subnets,
-          "chain-serving",
-          "short",
-          cacheRequest,
-          CHAIN_SERVING_CSV_COLUMNS,
-        );
-      }
-      return envelopeResponse(
-        cacheRequest,
-        {
-          data,
-          meta: await analyticsMeta(
-            env,
-            "/metagraph/chain/serving.json",
-            data.observed_at,
-          ),
-        },
-        "short",
-      );
-    },
-    `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
-  );
-  return request.method === "HEAD"
-    ? new Response(null, { status: response.status, headers: response.headers })
-    : response;
-}
+export const handleChainServing = makeChainEventHandler({
+  limitDefault: CHAIN_SERVING_LIMIT_DEFAULT,
+  limitMax: CHAIN_SERVING_LIMIT_MAX,
+  load: loadChainServing,
+  cacheKey: "chain-serving",
+  csvRows: "subnets",
+  csvColumns: CHAIN_SERVING_CSV_COLUMNS,
+  artifactPath: "/metagraph/chain/serving.json",
+});
 
 // GET /api/v1/chain/prometheus: network-wide Prometheus-endpoint serving activity across every
 // subnet over a 7d/30d window, read from the account_events PrometheusServed stream. The
 // telemetry-endpoint companion to chain/serving (axon endpoints); same window + limit params, HEAD
 // probes normalized through the GET cache key so they cannot bypass the edge cache and repeatedly
 // force the network-wide aggregations. The leaderboard is fixed to most-active-first (total events).
-export async function handleChainPrometheus(request, env, url, ctx = {}) {
-  const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
-  if (error) return analyticsQueryError(error);
-  const formatError = validateFormatParam(url);
-  if (formatError) return analyticsQueryError(formatError);
-  const { limit, error: limitError } = parseLimitParam(url, {
-    defaultLimit: CHAIN_PROMETHEUS_LIMIT_DEFAULT,
-    maxLimit: CHAIN_PROMETHEUS_LIMIT_MAX,
-  });
-  if (limitError) return analyticsQueryError(limitError);
-  const csv = csvRequested(url, request);
-
-  const cacheRequest =
-    request.method === "HEAD"
-      ? new Request(request, { method: "GET" })
-      : request;
-  const response = await withEdgeCache(
-    cacheRequest,
-    ctx,
-    env,
-    "chain-prometheus",
-    async () => {
-      const data =
-        (await tryPostgresTier(
-          env,
-          cacheRequest,
-          "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
-        )) ??
-        (await loadChainPrometheus(d1Runner(env), {
-          windowLabel: label,
-          windowDays: days,
-          limit,
-        }));
-      // CSV exports the row-shaped per-subnet leaderboard; the network rollup +
-      // intensity_distribution stay JSON-only (mirrors chain-serving).
-      if (csv) {
-        return csvResponse(
-          data.subnets,
-          "chain-prometheus",
-          "short",
-          cacheRequest,
-          CHAIN_PROMETHEUS_CSV_COLUMNS,
-        );
-      }
-      return envelopeResponse(
-        cacheRequest,
-        {
-          data,
-          meta: await analyticsMeta(
-            env,
-            "/metagraph/chain/prometheus.json",
-            data.observed_at,
-          ),
-        },
-        "short",
-      );
-    },
-    `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
-  );
-  return request.method === "HEAD"
-    ? new Response(null, { status: response.status, headers: response.headers })
-    : response;
-}
+export const handleChainPrometheus = makeChainEventHandler({
+  limitDefault: CHAIN_PROMETHEUS_LIMIT_DEFAULT,
+  limitMax: CHAIN_PROMETHEUS_LIMIT_MAX,
+  load: loadChainPrometheus,
+  cacheKey: "chain-prometheus",
+  csvRows: "subnets",
+  csvColumns: CHAIN_PROMETHEUS_CSV_COLUMNS,
+  artifactPath: "/metagraph/chain/prometheus.json",
+});
 
 // GET /api/v1/chain/axon-removals: network-wide axon-removal activity across every subnet over a
 // 7d/30d window, read from the account_events AxonInfoRemoved stream. The teardown-side companion to
@@ -1751,138 +1619,30 @@ export async function handleChainPrometheus(request, env, url, ctx = {}) {
 // axon-removals route; same window + limit params, HEAD probes normalized through the GET cache key
 // so they cannot bypass the edge cache and repeatedly force the network-wide aggregations. The
 // leaderboard is fixed to most-active-first (total AxonInfoRemoved events).
-export async function handleChainAxonRemovals(request, env, url, ctx = {}) {
-  const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
-  if (error) return analyticsQueryError(error);
-  const formatError = validateFormatParam(url);
-  if (formatError) return analyticsQueryError(formatError);
-  const { limit, error: limitError } = parseLimitParam(url, {
-    defaultLimit: CHAIN_AXON_REMOVALS_LIMIT_DEFAULT,
-    maxLimit: CHAIN_AXON_REMOVALS_LIMIT_MAX,
-  });
-  if (limitError) return analyticsQueryError(limitError);
-  const csv = csvRequested(url, request);
-
-  const cacheRequest =
-    request.method === "HEAD"
-      ? new Request(request, { method: "GET" })
-      : request;
-  const response = await withEdgeCache(
-    cacheRequest,
-    ctx,
-    env,
-    "chain-axon-removals",
-    async () => {
-      const data =
-        (await tryPostgresTier(
-          env,
-          cacheRequest,
-          "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
-        )) ??
-        (await loadChainAxonRemovals(d1Runner(env), {
-          windowLabel: label,
-          windowDays: days,
-          limit,
-        }));
-      // CSV exports the row-shaped per-subnet leaderboard; the network rollup +
-      // intensity_distribution stay JSON-only (mirrors chain-serving).
-      if (csv) {
-        return csvResponse(
-          data.subnets,
-          "chain-axon-removals",
-          "short",
-          cacheRequest,
-          CHAIN_AXON_REMOVALS_CSV_COLUMNS,
-        );
-      }
-      return envelopeResponse(
-        cacheRequest,
-        {
-          data,
-          meta: await analyticsMeta(
-            env,
-            "/metagraph/chain/axon-removals.json",
-            data.observed_at,
-          ),
-        },
-        "short",
-      );
-    },
-    `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
-  );
-  return request.method === "HEAD"
-    ? new Response(null, { status: response.status, headers: response.headers })
-    : response;
-}
+export const handleChainAxonRemovals = makeChainEventHandler({
+  limitDefault: CHAIN_AXON_REMOVALS_LIMIT_DEFAULT,
+  limitMax: CHAIN_AXON_REMOVALS_LIMIT_MAX,
+  load: loadChainAxonRemovals,
+  cacheKey: "chain-axon-removals",
+  csvRows: "subnets",
+  csvColumns: CHAIN_AXON_REMOVALS_CSV_COLUMNS,
+  artifactPath: "/metagraph/chain/axon-removals.json",
+});
 
 // GET /api/v1/chain/registrations: network-wide neuron-registration activity across every subnet
 // over a 7d/30d window, read from the account_events NeuronRegistered stream. Mirrors chain-serving:
 // window + limit params, HEAD probes normalized through the GET cache key so they cannot bypass the
 // edge cache and repeatedly force the network-wide aggregations, cache keyed on the analytics cron
 // freshness. The leaderboard is fixed to most-active-first (total NeuronRegistered events).
-export async function handleChainRegistrations(request, env, url, ctx = {}) {
-  const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
-  if (error) return analyticsQueryError(error);
-  const formatError = validateFormatParam(url);
-  if (formatError) return analyticsQueryError(formatError);
-  const { limit, error: limitError } = parseLimitParam(url, {
-    defaultLimit: CHAIN_REGISTRATIONS_LIMIT_DEFAULT,
-    maxLimit: CHAIN_REGISTRATIONS_LIMIT_MAX,
-  });
-  if (limitError) return analyticsQueryError(limitError);
-  const csv = csvRequested(url, request);
-
-  const cacheRequest =
-    request.method === "HEAD"
-      ? new Request(request, { method: "GET" })
-      : request;
-  const response = await withEdgeCache(
-    cacheRequest,
-    ctx,
-    env,
-    "chain-registrations",
-    async () => {
-      const data =
-        (await tryPostgresTier(
-          env,
-          cacheRequest,
-          "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
-        )) ??
-        (await loadChainRegistrations(d1Runner(env), {
-          windowLabel: label,
-          windowDays: days,
-          limit,
-        }));
-      // CSV exports the row-shaped per-subnet leaderboard; the network rollup +
-      // intensity_distribution stay JSON-only (mirrors chain-serving).
-      if (csv) {
-        return csvResponse(
-          data.subnets,
-          "chain-registrations",
-          "short",
-          cacheRequest,
-          CHAIN_REGISTRATIONS_CSV_COLUMNS,
-        );
-      }
-      return envelopeResponse(
-        cacheRequest,
-        {
-          data,
-          meta: await analyticsMeta(
-            env,
-            "/metagraph/chain/registrations.json",
-            data.observed_at,
-          ),
-        },
-        "short",
-      );
-    },
-    `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
-  );
-  return request.method === "HEAD"
-    ? new Response(null, { status: response.status, headers: response.headers })
-    : response;
-}
+export const handleChainRegistrations = makeChainEventHandler({
+  limitDefault: CHAIN_REGISTRATIONS_LIMIT_DEFAULT,
+  limitMax: CHAIN_REGISTRATIONS_LIMIT_MAX,
+  load: loadChainRegistrations,
+  cacheKey: "chain-registrations",
+  csvRows: "subnets",
+  csvColumns: CHAIN_REGISTRATIONS_CSV_COLUMNS,
+  artifactPath: "/metagraph/chain/registrations.json",
+});
 
 // GET /api/v1/chain/deregistrations: network-wide neuron-deregistration activity across every subnet
 // over a 7d/30d window, read from the account_events NeuronDeregistered stream. The exit-side
@@ -1890,69 +1650,15 @@ export async function handleChainRegistrations(request, env, url, ctx = {}) {
 // normalized through the GET cache key so they cannot bypass the edge cache and repeatedly force the
 // network-wide aggregations, cache keyed on the analytics cron freshness. The leaderboard is fixed
 // to most-active-first (total NeuronDeregistered events).
-export async function handleChainDeregistrations(request, env, url, ctx = {}) {
-  const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
-  if (error) return analyticsQueryError(error);
-  const formatError = validateFormatParam(url);
-  if (formatError) return analyticsQueryError(formatError);
-  const { limit, error: limitError } = parseLimitParam(url, {
-    defaultLimit: CHAIN_DEREGISTRATIONS_LIMIT_DEFAULT,
-    maxLimit: CHAIN_DEREGISTRATIONS_LIMIT_MAX,
-  });
-  if (limitError) return analyticsQueryError(limitError);
-  const csv = csvRequested(url, request);
-
-  const cacheRequest =
-    request.method === "HEAD"
-      ? new Request(request, { method: "GET" })
-      : request;
-  const response = await withEdgeCache(
-    cacheRequest,
-    ctx,
-    env,
-    "chain-deregistrations",
-    async () => {
-      const data =
-        (await tryPostgresTier(
-          env,
-          cacheRequest,
-          "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
-        )) ??
-        (await loadChainDeregistrations(d1Runner(env), {
-          windowLabel: label,
-          windowDays: days,
-          limit,
-        }));
-      // CSV exports the row-shaped per-subnet leaderboard; the network rollup +
-      // intensity_distribution stay JSON-only (mirrors chain-registrations).
-      if (csv) {
-        return csvResponse(
-          data.subnets,
-          "chain-deregistrations",
-          "short",
-          cacheRequest,
-          CHAIN_DEREGISTRATIONS_CSV_COLUMNS,
-        );
-      }
-      return envelopeResponse(
-        cacheRequest,
-        {
-          data,
-          meta: await analyticsMeta(
-            env,
-            "/metagraph/chain/deregistrations.json",
-            data.observed_at,
-          ),
-        },
-        "short",
-      );
-    },
-    `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
-  );
-  return request.method === "HEAD"
-    ? new Response(null, { status: response.status, headers: response.headers })
-    : response;
-}
+export const handleChainDeregistrations = makeChainEventHandler({
+  limitDefault: CHAIN_DEREGISTRATIONS_LIMIT_DEFAULT,
+  limitMax: CHAIN_DEREGISTRATIONS_LIMIT_MAX,
+  load: loadChainDeregistrations,
+  cacheKey: "chain-deregistrations",
+  csvRows: "subnets",
+  csvColumns: CHAIN_DEREGISTRATIONS_CSV_COLUMNS,
+  artifactPath: "/metagraph/chain/deregistrations.json",
+});
 
 // GET /api/v1/chain/stake-moves: network-wide stake-movement (re-delegation) activity across every
 // subnet over a 7d/30d window, read from the account_events StakeMoved stream. The re-delegation-churn
@@ -1960,69 +1666,15 @@ export async function handleChainDeregistrations(request, env, url, ctx = {}) {
 // params, HEAD probes normalized through the GET cache key so they cannot bypass the edge cache and
 // repeatedly force the network-wide aggregations. The leaderboard is fixed to most-active-first
 // (total StakeMoved events).
-export async function handleChainStakeMoves(request, env, url, ctx = {}) {
-  const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
-  if (error) return analyticsQueryError(error);
-  const formatError = validateFormatParam(url);
-  if (formatError) return analyticsQueryError(formatError);
-  const { limit, error: limitError } = parseLimitParam(url, {
-    defaultLimit: CHAIN_STAKE_MOVES_LIMIT_DEFAULT,
-    maxLimit: CHAIN_STAKE_MOVES_LIMIT_MAX,
-  });
-  if (limitError) return analyticsQueryError(limitError);
-  const csv = csvRequested(url, request);
-
-  const cacheRequest =
-    request.method === "HEAD"
-      ? new Request(request, { method: "GET" })
-      : request;
-  const response = await withEdgeCache(
-    cacheRequest,
-    ctx,
-    env,
-    "chain-stake-moves",
-    async () => {
-      const data =
-        (await tryPostgresTier(
-          env,
-          cacheRequest,
-          "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
-        )) ??
-        (await loadChainStakeMoves(d1Runner(env), {
-          windowLabel: label,
-          windowDays: days,
-          limit,
-        }));
-      // CSV exports the row-shaped per-subnet leaderboard; the network rollup +
-      // intensity_distribution stay JSON-only (mirrors chain-registrations).
-      if (csv) {
-        return csvResponse(
-          data.subnets,
-          "chain-stake-moves",
-          "short",
-          cacheRequest,
-          CHAIN_STAKE_MOVES_CSV_COLUMNS,
-        );
-      }
-      return envelopeResponse(
-        cacheRequest,
-        {
-          data,
-          meta: await analyticsMeta(
-            env,
-            "/metagraph/chain/stake-moves.json",
-            data.observed_at,
-          ),
-        },
-        "short",
-      );
-    },
-    `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
-  );
-  return request.method === "HEAD"
-    ? new Response(null, { status: response.status, headers: response.headers })
-    : response;
-}
+export const handleChainStakeMoves = makeChainEventHandler({
+  limitDefault: CHAIN_STAKE_MOVES_LIMIT_DEFAULT,
+  limitMax: CHAIN_STAKE_MOVES_LIMIT_MAX,
+  load: loadChainStakeMoves,
+  cacheKey: "chain-stake-moves",
+  csvRows: "subnets",
+  csvColumns: CHAIN_STAKE_MOVES_CSV_COLUMNS,
+  artifactPath: "/metagraph/chain/stake-moves.json",
+});
 
 // GET /api/v1/chain/stake-transfers: network-wide stake-transfer activity across every subnet over a
 // 7d/30d window, read from the account_events StakeTransferred stream. The between-coldkeys companion
@@ -2030,69 +1682,15 @@ export async function handleChainStakeMoves(request, env, url, ctx = {}) {
 // limit params, HEAD probes normalized through the GET cache key so they cannot bypass the edge cache
 // and repeatedly force the network-wide aggregations. The leaderboard is fixed to most-active-first
 // (total StakeTransferred events).
-export async function handleChainStakeTransfers(request, env, url, ctx = {}) {
-  const { label, days, error } = analyticsWindow(url, ["limit", "format"]);
-  if (error) return analyticsQueryError(error);
-  const formatError = validateFormatParam(url);
-  if (formatError) return analyticsQueryError(formatError);
-  const { limit, error: limitError } = parseLimitParam(url, {
-    defaultLimit: CHAIN_STAKE_TRANSFERS_LIMIT_DEFAULT,
-    maxLimit: CHAIN_STAKE_TRANSFERS_LIMIT_MAX,
-  });
-  if (limitError) return analyticsQueryError(limitError);
-  const csv = csvRequested(url, request);
-
-  const cacheRequest =
-    request.method === "HEAD"
-      ? new Request(request, { method: "GET" })
-      : request;
-  const response = await withEdgeCache(
-    cacheRequest,
-    ctx,
-    env,
-    "chain-stake-transfers",
-    async () => {
-      const data =
-        (await tryPostgresTier(
-          env,
-          cacheRequest,
-          "METAGRAPH_ACCOUNT_EVENTS_SOURCE",
-        )) ??
-        (await loadChainStakeTransfers(d1Runner(env), {
-          windowLabel: label,
-          windowDays: days,
-          limit,
-        }));
-      // CSV exports the row-shaped per-subnet leaderboard; the network rollup +
-      // intensity_distribution stay JSON-only (mirrors chain-stake-moves).
-      if (csv) {
-        return csvResponse(
-          data.subnets,
-          "chain-stake-transfers",
-          "short",
-          cacheRequest,
-          CHAIN_STAKE_TRANSFERS_CSV_COLUMNS,
-        );
-      }
-      return envelopeResponse(
-        cacheRequest,
-        {
-          data,
-          meta: await analyticsMeta(
-            env,
-            "/metagraph/chain/stake-transfers.json",
-            data.observed_at,
-          ),
-        },
-        "short",
-      );
-    },
-    `${canonicalAnalyticsCacheRoute(url, ["limit"])}${csv ? "&format=csv" : ""}`,
-  );
-  return request.method === "HEAD"
-    ? new Response(null, { status: response.status, headers: response.headers })
-    : response;
-}
+export const handleChainStakeTransfers = makeChainEventHandler({
+  limitDefault: CHAIN_STAKE_TRANSFERS_LIMIT_DEFAULT,
+  limitMax: CHAIN_STAKE_TRANSFERS_LIMIT_MAX,
+  load: loadChainStakeTransfers,
+  cacheKey: "chain-stake-transfers",
+  csvRows: "subnets",
+  csvColumns: CHAIN_STAKE_TRANSFERS_CSV_COLUMNS,
+  artifactPath: "/metagraph/chain/stake-transfers.json",
+});
 
 // Fee/tip market analytics (#1988): a per-UTC-day fee series (totals, averages,
 // exact medians) plus a windowed top-fee-payer list. COALESCE keeps NULL
