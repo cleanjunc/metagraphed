@@ -118,6 +118,25 @@
         "https://github.com/tensorplex-labs/subnet-docs/blob/main/data/30/subnet.json"
       ],
       "url": "https://api.taomarketcap.com/public/v1/subnets/30/candle-chart/"
+    },
+    {
+      "auth_required": false,
+      "authority": "community",
+      "id": "sn-30-endure-litepaper-docs",
+      "kind": "docs",
+      "name": "Endure Network litepaper",
+      "notes": "Official Endure Network litepaper page on the project's own docs site, linked from the docs nav (Introduction > Architecture > Resources > Litepaper). Distinct from the already-registered docs root (sn-30-endure-docs), which does not itself cover the litepaper content.",
+      "provider": "endure",
+      "public_safe": true,
+      "review": {
+        "state": "community-submitted",
+        "submitted_by": "galuis116"
+      },
+      "source_urls": [
+        "https://endure.network/",
+        "https://docs.endure.network/"
+      ],
+      "url": "https://docs.endure.network/build/resources/litepaper"
     }
   ],
   "social": {
