@@ -11672,6 +11672,7 @@
               "https://example.com/contact"
             ],
             "format": "uri",
+            "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
             "type": "string"
           },
           "docs_url": {
@@ -11679,6 +11680,7 @@
               "https://docs.example.com"
             ],
             "format": "uri",
+            "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
             "type": "string"
           },
           "endpoint_count": {
@@ -11691,6 +11693,7 @@
               "https://github.com/example"
             ],
             "format": "uri",
+            "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
             "type": "string"
           },
           "id": {
@@ -11784,6 +11787,7 @@
               "https://example.com/team"
             ],
             "format": "uri",
+            "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
             "type": "string"
           },
           "website_url": {
@@ -11791,6 +11795,7 @@
               "https://example.com"
             ],
             "format": "uri",
+            "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
             "type": "string"
           }
         },
