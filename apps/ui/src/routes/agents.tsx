@@ -172,7 +172,7 @@ function AgentsBody() {
                     {sdk.lang} · {sdk.pkg}
                   </ExternalLink>
                 </div>
-                <CopyButton value={sdk.install} label={`${sdk.lang} install`} />
+                <CopyButton value={sdk.install} label={`${sdk.lang} install`} compact />
               </div>
             ))}
           </div>
@@ -210,6 +210,7 @@ function AgentsBody() {
       {/* Every machine-readable surface — a calm list, not a card wall */}
       <section>
         <SectionHeading
+          id="agent-resources"
           title="Everything else, fetchable directly"
           intro={`A paste-ready agent prompt, a Bittensor skill, llms.txt, the OpenAPI contract, grounded Q&A, semantic search, and bulk data — ${res.summary.callable_service_count} callable services across ${res.summary.subnet_count} subnets, all indexed at /api/v1/agent-resources.`}
         />
@@ -223,11 +224,11 @@ function AgentsBody() {
                 <span className="flex-1 truncate text-[14px] text-ink-strong">{r.title}</span>
                 <ExternalLink
                   href={r.url}
-                  className="hidden shrink-0 font-mono text-[11px] text-ink-muted hover:text-ink-strong sm:inline"
+                  className="hidden shrink-0 font-mono text-[11px] text-ink-muted hover:text-ink-strong sm:inline-flex"
                 >
                   {r.url.replace("https://api.metagraph.sh", "")}
                 </ExternalLink>
-                <CopyButton value={r.url} label={`${r.title} URL`} />
+                <CopyButton value={r.url} label={`${r.title} URL`} compact />
               </div>
             );
           })}
@@ -242,7 +243,7 @@ function AgentsBody() {
             <div key={q.label} className="rounded-lg border border-border bg-card">
               <div className="flex items-center justify-between border-b border-border px-4 py-2">
                 <span className="mg-label">{q.label}</span>
-                <CopyButton value={q.cmd} label={q.label} />
+                <CopyButton value={q.cmd} label={q.label} compact />
               </div>
               <pre className="overflow-x-auto px-4 py-3 font-mono text-[11px] leading-relaxed text-ink">
                 {q.cmd}

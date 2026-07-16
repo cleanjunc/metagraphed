@@ -20,12 +20,15 @@ export function AccountAddress({
   fallback,
   keep,
   copyButtonClassName,
+  compact,
 }: {
   ss58?: string | null;
   fallback: ReactNode;
   /** Chars kept at each end before the ellipsis (passed to shortHash). Defaults to 6. */
   keep?: number;
   copyButtonClassName?: string;
+  /** Forwarded to the inner CopyButton — pass true inside a dense table/list row. See CopyButton's `compact` doc. */
+  compact?: boolean;
 }) {
   if (ss58 && isValidSs58(ss58)) {
     return (
@@ -35,7 +38,7 @@ export function AccountAddress({
             {shortHash(ss58, keep)}
           </Link>
         </EntityHoverCard>
-        <CopyButton value={ss58} label="account" className={copyButtonClassName} />
+        <CopyButton value={ss58} label="account" className={copyButtonClassName} compact={compact} />
       </span>
     );
   }

@@ -418,12 +418,7 @@ function ValidBlockDetail({ refValue }: { refValue: string }) {
                         {eventKindLabel(event.event_kind)}
                       </td>
                       <td className="px-4 py-2.5 font-mono text-[11px] text-ink">
-                        <AccountAddress
-                          ss58={event.hotkey}
-                          keep={10}
-                          copyButtonClassName="-my-3.5"
-                          fallback="—"
-                        />
+                        <AccountAddress ss58={event.hotkey} keep={10} compact fallback="—" />
                       </td>
                       <td className="px-4 py-2.5 text-right font-mono text-[11px] tabular-nums text-ink">
                         {amount}
@@ -491,7 +486,7 @@ function ValidBlockDetail({ refValue }: { refValue: string }) {
                         <span className="truncate" title={formatChainEventArgs(event.args)}>
                           {formatChainEventArgs(event.args)}
                         </span>
-                        <CopyButton value={formatChainEventArgs(event.args)} label="args" />
+                        <CopyButton value={formatChainEventArgs(event.args)} label="args" compact />
                       </div>
                     </td>
                   </tr>
