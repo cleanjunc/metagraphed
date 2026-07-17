@@ -3,13 +3,16 @@ import { Link } from "@tanstack/react-router";
 import { CopyButton } from "@jsonbored/ui-kit";
 import { shortHash } from "@/lib/metagraphed/blocks";
 import { formatNumber } from "@/lib/metagraphed/format";
-import { taoCompact, SponsoredBadge } from "@/components/metagraphed/neuron-format";
+import { taoCompact, scoreStr, SponsoredBadge } from "@/components/metagraphed/neuron-format";
 import { ValidatorIdentityChip } from "@/components/metagraphed/validator-identity-chip";
 import { formatApyPct, formatTakePct } from "@/lib/metagraphed/validator-apy";
-import type { GlobalValidator } from "@/lib/metagraphed/types";
+import type { GlobalValidator, GlobalValidatorSort } from "@/lib/metagraphed/types";
 
-const TH_BASE = "px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-muted";
-const TD_BASE = "px-3 py-2 font-mono text-[11px]";
+// Cell padding is NOT baked in here: the route owns it so one density choice can
+// drive every cell (classNames() plain-joins, so a route-side "py-1.5" would not
+// reliably beat a "py-2" baked in here -- CSS source order, not class order, wins).
+const TH_BASE = "font-mono text-[10px] uppercase tracking-widest text-ink-muted";
+const TD_BASE = "font-mono text-[11px]";
 const TD_NUM = `${TD_BASE} text-right tabular-nums`;
 
 /**
@@ -24,6 +27,14 @@ export interface ValidatorColumn {
   thClassName: string;
   tdClassName: string;
   cell: (v: GlobalValidator) => ReactNode;
+  /**
+   * The `/api/v1/validators` sort key this column ranks by, when it has one.
+   * Columns carrying it render a clickable SortHeader; the rest stay static
+   * text. Keeping the mapping on the column (rather than a parallel lookup in
+   * the route) is what makes "every sort key is reachable from a header" a
+   * property the tests can assert against the same array the table renders.
+   */
+  sort?: GlobalValidatorSort;
 }
 
 const numeric = (
@@ -95,10 +106,11 @@ export const VALIDATOR_COLUMNS: ValidatorColumn[] = [
     // apy_estimate (#2551) is a 0..1 fraction; formatApyPct takes a percentage.
     cell: (v) => formatApyPct(v.apy_estimate != null ? v.apy_estimate * 100 : null),
   },
-  { ...numeric("Active subnets"), cell: (v) => formatNumber(v.subnet_count) },
+  { ...numeric("Active subnets"), sort: "subnet_count", cell: (v) => formatNumber(v.subnet_count) },
   {
     ...numeric("UIDs"),
     tdClassName: `${TD_NUM} text-ink-muted`,
+    sort: "uid_count",
     cell: (v) => formatNumber(v.uid_count),
   },
   {
@@ -108,12 +120,30 @@ export const VALIDATOR_COLUMNS: ValidatorColumn[] = [
   },
   {
     ...numeric("Dominance"),
+    sort: "stake_dominance",
     cell: (v) => (v.stake_dominance != null ? `${(v.stake_dominance * 100).toFixed(2)}%` : "—"),
   },
-  { ...numeric("Total stake"), cell: (v) => taoCompact(v.total_stake_tao) },
+  { ...numeric("Total stake"), sort: "total_stake", cell: (v) => taoCompact(v.total_stake_tao) },
   {
     ...numeric("Total emission"),
     tdClassName: `${TD_NUM} text-ink-muted`,
+    sort: "total_emission",
     cell: (v) => taoCompact(v.total_emission_tao),
+  },
+  // Trust closes the gap the `<select>` used to cover on its own: avg/max trust
+  // were sortable but had no column, so a header-driven table would have made
+  // both keys unreachable. Same 3-dp convention the per-subnet neuron table
+  // renders "Val Trust" with.
+  {
+    ...numeric("Avg trust"),
+    tdClassName: `${TD_NUM} text-ink-muted`,
+    sort: "avg_validator_trust",
+    cell: (v) => scoreStr(v.avg_validator_trust),
+  },
+  {
+    ...numeric("Max trust"),
+    tdClassName: `${TD_NUM} text-ink-muted`,
+    sort: "max_validator_trust",
+    cell: (v) => scoreStr(v.max_validator_trust),
   },
 ];

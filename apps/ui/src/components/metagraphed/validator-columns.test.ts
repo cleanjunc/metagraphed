@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { VALIDATOR_COLUMNS } from "./validator-columns";
-import type { GlobalValidator } from "@/lib/metagraphed/types";
+import type { GlobalValidator, GlobalValidatorSort } from "@/lib/metagraphed/types";
 
 // A fully-populated row so every column's cell renderer resolves a real value
 // rather than its null fallback.
@@ -74,6 +74,39 @@ describe("VALIDATOR_COLUMNS", () => {
       "Total emission",
     ]) {
       expect(headers).toContain(h);
+    }
+  });
+
+  // #5344: the table's `<select>` was replaced by clickable column headers, so a
+  // sort key with no column backing it would be unreachable from the UI — the
+  // exact regression that made avg/max trust select-only in the first place.
+  it("gives every /api/v1/validators sort key a column to sort from", () => {
+    const sortable = new Set(VALIDATOR_COLUMNS.map((c) => c.sort).filter(Boolean));
+    const apiSortKeys: GlobalValidatorSort[] = [
+      "avg_validator_trust",
+      "max_validator_trust",
+      "stake_dominance",
+      "subnet_count",
+      "total_emission",
+      "total_stake",
+      "uid_count",
+    ];
+    for (const key of apiSortKeys) {
+      expect(sortable).toContain(key);
+    }
+  });
+
+  it("maps each sort key to exactly one column (no ambiguous header)", () => {
+    const keys = VALIDATOR_COLUMNS.map((c) => c.sort).filter(Boolean);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  // Padding is the route's job (density-driven) -- a column baking in its own
+  // py-* would silently win or lose against it depending on CSS source order.
+  it("leaves cell padding to the route so the density toggle can own it", () => {
+    for (const col of VALIDATOR_COLUMNS) {
+      expect(col.thClassName).not.toMatch(/\bp[xy]?-/);
+      expect(col.tdClassName).not.toMatch(/\bp[xy]?-/);
     }
   });
 });

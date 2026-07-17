@@ -17,20 +17,56 @@ import {
   DownloadCsvButton,
   ActionBar,
 } from "@jsonbored/ui-kit";
+import { SortHeader, ariaSort } from "@/components/metagraphed/table-controls";
 import {
   chainDeregistrationsQuery,
   chainWeightsQuery,
   subnetsQuery,
 } from "@/lib/metagraphed/queries";
-import { formatNumber } from "@/lib/metagraphed/format";
+import { classNames, formatNumber } from "@/lib/metagraphed/format";
+import { withRank, sortRanked, type SortOrder } from "@/lib/metagraphed/leaderboard-sort";
 import { buildUrl } from "@/lib/metagraphed/client";
 import type { Subnet } from "@/lib/metagraphed/types";
 
+// Each board owns its own sort so the two are independently rankable and the
+// whole view stays shareable in one URL — the same search-param-backed model
+// /subnets uses, rather than component-local state that a shared link drops.
+const weightsSortFields = [
+  "rank",
+  "subnet",
+  "weight_sets",
+  "distinct_setters",
+  "sets_per_setter",
+] as const;
+const deregsSortFields = [
+  "rank",
+  "subnet",
+  "deregistrations",
+  "distinct_deregistered_hotkeys",
+  "deregistrations_per_hotkey",
+] as const;
+
+type WeightsSortField = (typeof weightsSortFields)[number];
+type DeregsSortField = (typeof deregsSortFields)[number];
+
 const leaderboardsSearchSchema = z.object({
   window: fallback(z.enum(["7d", "30d"]), "7d").default("7d"),
+  weights_sort: fallback(z.enum(weightsSortFields), "rank").default("rank"),
+  weights_order: fallback(z.enum(["asc", "desc"]), "asc").default("asc"),
+  deregs_sort: fallback(z.enum(deregsSortFields), "rank").default("rank"),
+  deregs_order: fallback(z.enum(["asc", "desc"]), "asc").default("asc"),
 });
 
 type LeaderboardWindow = z.infer<typeof leaderboardsSearchSchema>["window"];
+
+/**
+ * Sort toggle shared by both boards: a new column starts ascending, the active
+ * column flips — identical to /subnets' onSort, so the interaction transfers
+ * between ranked-list pages instead of being re-learned per page.
+ */
+function nextOrder(prevField: string | undefined, prevOrder: SortOrder | undefined, field: string) {
+  return prevField === field && prevOrder === "asc" ? "desc" : "asc";
+}
 
 export const Route = createFileRoute("/leaderboards")({
   validateSearch: zodValidator(leaderboardsSearchSchema),
@@ -135,9 +171,52 @@ function useSubnetById(): Map<number, Subnet> {
 function WeightSettingLeaderboard({ win }: { win: LeaderboardWindow }) {
   const { data: boardRes } = useSuspenseQuery(chainWeightsQuery(win));
   const subnetById = useSubnetById();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const search = Route.useSearch();
+  const sort: WeightsSortField = search.weights_sort;
+  const order: SortOrder = search.weights_order;
   const board = boardRes.data;
   const network = board.network;
   const dist = board.intensity_distribution;
+
+  // Resolve the subnet name onto the row before sorting so the Subnet column
+  // ranks by what it displays, not by netuid.
+  const rows = useMemo(() => {
+    const named = withRank(board.subnets).map((row) => ({
+      ...row,
+      name: subnetById.get(row.netuid)?.name ?? `Subnet ${row.netuid}`,
+    }));
+    if (sort === "rank") return sortRanked(named, (r) => r.rank, order);
+    if (sort === "subnet") return sortRanked(named, (r) => r.name, order);
+    return sortRanked(named, (r) => r[sort], order);
+  }, [board.subnets, subnetById, sort, order]);
+
+  const onSort = (field: string) =>
+    navigate({
+      search: (prev: Record<string, unknown>) =>
+        ({
+          ...prev,
+          weights_sort: field,
+          weights_order: nextOrder(sort, order, field),
+        }) as never,
+      replace: true,
+    });
+
+  const col = (field: WeightsSortField, label: string, align: "left" | "right" = "right") => (
+    <th
+      className={classNames(TH, align === "right" && "text-right")}
+      aria-sort={ariaSort(sort === field, order)}
+    >
+      <SortHeader
+        label={label}
+        field={field}
+        active={sort === field}
+        order={order}
+        onSort={onSort}
+        align={align}
+      />
+    </th>
+  );
 
   return (
     <div className="space-y-8">
@@ -208,9 +287,9 @@ function WeightSettingLeaderboard({ win }: { win: LeaderboardWindow }) {
               stacked card per subnet instead — mirrors the cards/desktop-only
               split the explorer leaderboards use for the same static boards. */}
           <div className="md:hidden space-y-2 p-3">
-            {board.subnets.map((row, i) => {
+            {rows.map((row) => {
               const subnet = subnetById.get(row.netuid);
-              const name = subnet?.name ?? `Subnet ${row.netuid}`;
+              const name = row.name;
               return (
                 <div key={row.netuid} className="rounded border border-border bg-card p-3">
                   <div className="flex items-center justify-between gap-2">
@@ -220,7 +299,7 @@ function WeightSettingLeaderboard({ win }: { win: LeaderboardWindow }) {
                       className="inline-flex min-w-0 items-center gap-2 hover:text-accent"
                     >
                       <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-muted">
-                        {i + 1}
+                        {row.rank}
                       </span>
                       <BrandIcon
                         size={18}
@@ -249,21 +328,21 @@ function WeightSettingLeaderboard({ win }: { win: LeaderboardWindow }) {
             <table className="w-full text-left text-sm">
               <thead>
                 <tr>
-                  <th className={TH}>Rank</th>
-                  <th className={TH}>Subnet</th>
-                  <th className={`${TH} text-right`}>Weight-sets</th>
-                  <th className={`${TH} text-right`}>Distinct setters</th>
-                  <th className={`${TH} text-right`}>Per setter</th>
+                  {col("rank", "Rank")}
+                  {col("subnet", "Subnet", "left")}
+                  {col("weight_sets", "Weight-sets")}
+                  {col("distinct_setters", "Distinct setters")}
+                  {col("sets_per_setter", "Per setter")}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {board.subnets.map((row, i) => {
+                {rows.map((row) => {
                   const subnet = subnetById.get(row.netuid);
-                  const name = subnet?.name ?? `Subnet ${row.netuid}`;
+                  const name = row.name;
                   return (
                     <tr key={row.netuid} className="hover:bg-surface/40">
                       <td className="px-4 py-2.5 text-right font-mono text-[11px] tabular-nums text-ink-muted">
-                        {i + 1}
+                        {row.rank}
                       </td>
                       <td className="px-4 py-2.5">
                         <Link
@@ -305,8 +384,49 @@ function WeightSettingLeaderboard({ win }: { win: LeaderboardWindow }) {
 function DeregistrationsLeaderboard({ win }: { win: LeaderboardWindow }) {
   const { data: boardRes } = useSuspenseQuery(chainDeregistrationsQuery(win));
   const subnetById = useSubnetById();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const search = Route.useSearch();
+  const sort: DeregsSortField = search.deregs_sort;
+  const order: SortOrder = search.deregs_order;
   const board = boardRes.data;
   const network = board.network;
+
+  const rows = useMemo(() => {
+    const named = withRank(board.subnets).map((row) => ({
+      ...row,
+      name: subnetById.get(row.netuid)?.name ?? `Subnet ${row.netuid}`,
+    }));
+    if (sort === "rank") return sortRanked(named, (r) => r.rank, order);
+    if (sort === "subnet") return sortRanked(named, (r) => r.name, order);
+    return sortRanked(named, (r) => r[sort], order);
+  }, [board.subnets, subnetById, sort, order]);
+
+  const onSort = (field: string) =>
+    navigate({
+      search: (prev: Record<string, unknown>) =>
+        ({
+          ...prev,
+          deregs_sort: field,
+          deregs_order: nextOrder(sort, order, field),
+        }) as never,
+      replace: true,
+    });
+
+  const col = (field: DeregsSortField, label: string, align: "left" | "right" = "right") => (
+    <th
+      className={classNames(TH, align === "right" && "text-right")}
+      aria-sort={ariaSort(sort === field, order)}
+    >
+      <SortHeader
+        label={label}
+        field={field}
+        active={sort === field}
+        order={order}
+        onSort={onSort}
+        align={align}
+      />
+    </th>
+  );
 
   return (
     <div className="space-y-8">
@@ -370,9 +490,9 @@ function DeregistrationsLeaderboard({ win }: { win: LeaderboardWindow }) {
           </div>
           {/* < md: card fallback per subnet (see the weight-setting board). */}
           <div className="md:hidden space-y-2 p-3">
-            {board.subnets.map((row, i) => {
+            {rows.map((row) => {
               const subnet = subnetById.get(row.netuid);
-              const name = subnet?.name ?? `Subnet ${row.netuid}`;
+              const name = row.name;
               return (
                 <div key={row.netuid} className="rounded border border-border bg-card p-3">
                   <div className="flex items-center justify-between gap-2">
@@ -382,7 +502,7 @@ function DeregistrationsLeaderboard({ win }: { win: LeaderboardWindow }) {
                       className="inline-flex min-w-0 items-center gap-2 hover:text-accent"
                     >
                       <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-muted">
-                        {i + 1}
+                        {row.rank}
                       </span>
                       <BrandIcon
                         size={18}
@@ -411,21 +531,21 @@ function DeregistrationsLeaderboard({ win }: { win: LeaderboardWindow }) {
             <table className="w-full text-left text-sm">
               <thead>
                 <tr>
-                  <th className={TH}>Rank</th>
-                  <th className={TH}>Subnet</th>
-                  <th className={`${TH} text-right`}>Deregistrations</th>
-                  <th className={`${TH} text-right`}>Distinct hotkeys</th>
-                  <th className={`${TH} text-right`}>Per hotkey</th>
+                  {col("rank", "Rank")}
+                  {col("subnet", "Subnet", "left")}
+                  {col("deregistrations", "Deregistrations")}
+                  {col("distinct_deregistered_hotkeys", "Distinct hotkeys")}
+                  {col("deregistrations_per_hotkey", "Per hotkey")}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {board.subnets.map((row, i) => {
+                {rows.map((row) => {
                   const subnet = subnetById.get(row.netuid);
-                  const name = subnet?.name ?? `Subnet ${row.netuid}`;
+                  const name = row.name;
                   return (
                     <tr key={row.netuid} className="hover:bg-surface/40">
                       <td className="px-4 py-2.5 text-right font-mono text-[11px] tabular-nums text-ink-muted">
-                        {i + 1}
+                        {row.rank}
                       </td>
                       <td className="px-4 py-2.5">
                         <Link
