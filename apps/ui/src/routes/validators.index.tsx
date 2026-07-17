@@ -146,6 +146,39 @@ function ValidatorsPage() {
   );
 }
 
+function SortSelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: GlobalValidatorSort;
+  onChange: (v: GlobalValidatorSort) => void;
+  className?: string;
+}) {
+  return (
+    <label
+      className={classNames(
+        "inline-flex items-center gap-1.5 rounded border border-border bg-paper px-2 py-1 text-xs",
+        className,
+      )}
+    >
+      <span className="font-mono text-[10px] uppercase tracking-widest text-ink-muted">Sort</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as GlobalValidatorSort)}
+        className="bg-transparent text-ink-strong text-xs rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label="Sort validators"
+      >
+        {validatorSortKeys.map((k) => (
+          <option key={k} value={k}>
+            {SORT_LABELS[k]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function ValidatorsTable({
   sort,
   density,
@@ -159,7 +192,10 @@ function ValidatorsTable({
   const validators = res.data.validators;
   const generatedAt = res.meta?.generated_at ?? null;
   const compact = density === "compact";
-  const cellPad = compact ? "px-3 py-1.5" : "px-4 py-2.5";
+  // "comfortable" keeps this table's existing px-3 py-2 exactly, so the default
+  // view is unchanged and compact is purely opt-in; a wider px-4 (as /subnets
+  // uses) would squeeze this table's much longer column set for no benefit.
+  const cellPad = compact ? "px-3 py-1.5" : "px-3 py-2";
 
   return (
     <div className="space-y-3">
@@ -174,6 +210,12 @@ function ValidatorsTable({
         <span className="font-mono text-[11px] text-ink-muted">
           {formatNumber(validators.length)} validators · ranked by {SORT_LABELS[sort]}
         </span>
+        {/* < md this page renders the card list, not the table, so there are no
+            column headers to click — the select stays as the mobile sort
+            affordance rather than leaving small viewports unable to sort at
+            all. /subnets can drop straight to headers because its view toggle
+            can put a real table on screen; this page has no such toggle. */}
+        <SortSelect value={sort} onChange={onSortChange} className="md:hidden" />
       </div>
 
       {validators.length > 0 ? (
