@@ -1,6 +1,6 @@
 import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import { z } from "zod";
 import { fallback, zodValidator } from "@tanstack/zod-adapter";
 import { Boxes, Coins, Gauge, Percent, TriangleAlert, Users, Zap } from "lucide-react";
@@ -10,10 +10,10 @@ import { EmptyState, PageHeading, Skeleton, StaleBanner } from "@/components/met
 import { ApiSourceFooter } from "@/components/metagraphed/api-source-footer";
 import { EndpointSnippet } from "@/components/metagraphed/endpoint-snippet";
 import { QueryErrorBoundary } from "@/components/metagraphed/error-boundary";
-import { PageHero, ShareButton, SectionAnchor, CopyableCode, StatTile } from "@jsonbored/ui-kit";
+import { PageHero, ShareButton, SectionAnchor, StatTile } from "@jsonbored/ui-kit";
 import { ValidatorHistoryChart } from "@/components/metagraphed/validator-history-chart";
 import { ValidatorApyPanel } from "@/components/metagraphed/validator-apy-panel";
-import { ValidatorIdentityChip } from "@/components/metagraphed/validator-identity-chip";
+import { AccountAddress } from "@/components/metagraphed/account-address";
 import { WatchValidatorAlert } from "@/components/metagraphed/watch-validator-alert";
 import { StakeUnstakeModal } from "@/components/metagraphed/stake-unstake-modal";
 import { TakeManagementModal } from "@/components/metagraphed/take-management-modal";
@@ -292,24 +292,39 @@ function ValidatorDetail({ hotkey }: { hotkey: string }) {
         title={displayName}
         description={
           <span className="block space-y-4">
-            {/* With no declared operator identity the chip would only repeat the
-                hotkey already shown as the title and in the copyable field
-                below, so it's dropped when there's nothing extra to show (#5311). */}
-            {hasIdentity ? (
-              <span className="flex flex-wrap items-center gap-3">
-                <ValidatorIdentityChip hotkey={hotkey} identity={identity} size={40} />
-                <span className="text-[11px] text-ink-muted">
-                  Operator identity is declared on the coldkey — not hotkey-specific (#5234).
-                </span>
-              </span>
-            ) : null}
             <span className="block max-w-2xl text-sm text-ink-muted">
               Cross-subnet performance, nominators, and staking history for one Bittensor validator
               hotkey.
             </span>
-            <span className="inline-flex max-w-full min-w-0 rounded-2xl border border-border/80 bg-card/80 px-3 py-2 mg-card-glow">
-              <CopyableCode value={hotkey} truncate={false} className="max-w-full" />
-            </span>
+            {/* Hotkey + coldkey (#6427) get identical, symmetric AccountAddress
+                rows -- the operator name is already the page title, so it
+                isn't repeated here. truncate={false} + valueClassName lets
+                the browser ellipsize to whatever width the row actually has
+                (full value on desktop, fewer characters on mobile) instead
+                of a fixed shortHash cutoff that either overflows narrow
+                layouts or wastes wide ones. */}
+            <dl className="max-w-2xl divide-y divide-border/80 rounded-2xl border border-border/80 bg-card/80 mg-card-glow-accent">
+              <FieldRow label="Hotkey">
+                <span className="flex w-full min-w-0 items-center">
+                  <AccountAddress
+                    ss58={hotkey}
+                    truncate={false}
+                    valueClassName="truncate min-w-0"
+                    fallback="—"
+                  />
+                </span>
+              </FieldRow>
+              <FieldRow label="Coldkey">
+                <span className="flex w-full min-w-0 items-center">
+                  <AccountAddress
+                    ss58={detail.coldkey}
+                    truncate={false}
+                    valueClassName="truncate min-w-0"
+                    fallback={<span className="text-ink-muted">Not reported</span>}
+                  />
+                </span>
+              </FieldRow>
+            </dl>
           </span>
         }
         actions={
@@ -517,5 +532,19 @@ function ValidatorDetail({ hotkey }: { hotkey: string }) {
         ]}
       />
     </>
+  );
+}
+
+// Mirrors blocks.$ref.tsx / extrinsics.$hash.tsx's own FieldRow (#6424) --
+// same label/value dl row idiom, copied rather than shared per this
+// codebase's per-route convention for small local helpers.
+function FieldRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
+      <dt className="font-mono text-[10px] uppercase tracking-widest text-ink-muted sm:w-20 sm:shrink-0">
+        {label}
+      </dt>
+      <dd className="min-w-0 w-full sm:flex-1">{children}</dd>
+    </div>
   );
 }
