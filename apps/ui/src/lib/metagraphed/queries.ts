@@ -116,6 +116,7 @@ import type {
   Extrinsic,
   ExtrinsicCallArg,
   SudoKey,
+  NetworkParameters,
   RuntimeTransition,
   RuntimeVersionHistory,
   Transfer,
@@ -2166,6 +2167,32 @@ export const sudoKeyQuery = () =>
         meta: res.meta,
         url: res.url,
       } as ApiResult<SudoKey>;
+    },
+    staleTime: STALE_LONG,
+  });
+
+// #6997: current global Subtensor protocol/governance parameters. Each field
+// independently defaults to null (never 0/false) on a missing/non-numeric
+// value, matching the REST route's own "each field is independently null on
+// its own RPC failure" contract -- a real zero must stay distinguishable
+// from a failed read.
+export const networkParametersQuery = () =>
+  queryOptions({
+    queryKey: k("network-parameters"),
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch<unknown>("/api/v1/network/parameters", { signal });
+      const d = isRecord(res.data) ? res.data : {};
+      return {
+        data: {
+          tao_weight: firstFiniteNumber(d.tao_weight) ?? null,
+          stake_threshold_tao: firstFiniteNumber(d.stake_threshold_tao) ?? null,
+          pending_childkey_cooldown_blocks:
+            firstFiniteNumber(d.pending_childkey_cooldown_blocks) ?? null,
+          queried_at: firstString(d.queried_at) ?? null,
+        } as NetworkParameters,
+        meta: res.meta,
+        url: res.url,
+      } as ApiResult<NetworkParameters>;
     },
     staleTime: STALE_LONG,
   });

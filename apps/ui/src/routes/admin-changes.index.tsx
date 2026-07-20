@@ -1,16 +1,19 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Suspense } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { fallback, zodValidator } from "@tanstack/zod-adapter";
+import { Scale, Coins, Timer } from "lucide-react";
 import { AppShell } from "@/components/metagraphed/app-shell";
 import { ApiSourceFooter } from "@/components/metagraphed/api-source-footer";
 import { Skeleton } from "@/components/metagraphed/states";
-import { PageHero, ShareButton, DownloadCsvButton, ActionBar } from "@jsonbored/ui-kit";
+import { PageHero, ShareButton, DownloadCsvButton, ActionBar, StatTile } from "@jsonbored/ui-kit";
 import { QueryErrorBoundary } from "@/components/metagraphed/error-boundary";
 import { CallModuleExtrinsicsTable } from "@/components/metagraphed/call-module-extrinsics-table";
-import { governanceConfigChangesQuery } from "@/lib/metagraphed/queries";
+import { governanceConfigChangesQuery, networkParametersQuery } from "@/lib/metagraphed/queries";
 import { buildUrl } from "@/lib/metagraphed/client";
 import { API_BASE } from "@/lib/metagraphed/config";
+import { formatNumber, formatTao } from "@/lib/metagraphed/format";
 
 const adminChangesSearchSchema = z.object({
   limit: fallback(z.number().int().min(1).max(100), 50).default(50),
@@ -75,16 +78,73 @@ function AdminChangesPage() {
           </>
         }
       />
+      {/* #6997: the change-log below is a history of governance config-change
+          events -- it never showed the *current* live values of the three
+          key protocol/governance parameters those changes actually move.
+          Own QueryErrorBoundary/Suspense so a slow/failed RPC read never
+          blocks the (unrelated, artifact-backed) change-log table below. */}
+      <QueryErrorBoundary>
+        <Suspense
+          fallback={
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+              <Skeleton className="h-20" />
+              <Skeleton className="h-20" />
+              <Skeleton className="h-20" />
+            </div>
+          }
+        >
+          <NetworkParametersCard />
+        </Suspense>
+      </QueryErrorBoundary>
       <QueryErrorBoundary>
         <Suspense fallback={<Skeleton className="h-96 w-full" />}>
           <AdminChangesTable />
         </Suspense>
       </QueryErrorBoundary>
       <ApiSourceFooter
-        paths={["/api/v1/governance/config-changes"]}
+        paths={["/api/v1/governance/config-changes", "/api/v1/network/parameters"]}
         artifacts={["/metagraph/governance/config-changes.json"]}
       />
     </AppShell>
+  );
+}
+
+// #6997: current values of the three global Subtensor protocol/governance
+// parameters the change-log table below is a *history* of. Each field is
+// independently null on its own RPC failure (never coerced to 0), so
+// StatTile's own "—" empty-value rendering is what a viewer sees on a
+// per-field failure -- distinct from a real zero (e.g. tao_weight at 0%).
+function NetworkParametersCard() {
+  const { data: res } = useSuspenseQuery(networkParametersQuery());
+  const p = res.data;
+  const taoWeightPct = p.tao_weight != null ? `${(p.tao_weight * 100).toFixed(2)}%` : "—";
+
+  return (
+    <div className="mb-6">
+      <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-muted">
+        Current network parameters
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <StatTile
+          icon={Scale}
+          eyebrow="TaoWeight"
+          value={taoWeightPct}
+          hint="root-weight ratio in consensus"
+        />
+        <StatTile
+          icon={Coins}
+          eyebrow="StakeThreshold"
+          value={formatTao(p.stake_threshold_tao)}
+          hint="min stake to register a hotkey"
+        />
+        <StatTile
+          icon={Timer}
+          eyebrow="PendingChildKeyCooldown"
+          value={formatNumber(p.pending_childkey_cooldown_blocks)}
+          hint="blocks before a pending child key activates"
+        />
+      </div>
+    </div>
   );
 }
 

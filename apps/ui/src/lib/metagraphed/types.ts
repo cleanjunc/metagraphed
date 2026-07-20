@@ -1467,6 +1467,18 @@ export interface SudoKey {
   queried_at?: string | null;
 }
 
+/** Current global Subtensor protocol/governance parameters from
+ * /api/v1/network/parameters (#6343). Each field is independently null on
+ * its own RPC failure -- never coerced to 0/false, so a real zero value
+ * (e.g. tao_weight legitimately at 0) stays distinguishable from a failed
+ * read (#6997). */
+export interface NetworkParameters {
+  tao_weight: number | null;
+  stake_threshold_tao: number | null;
+  pending_childkey_cooldown_blocks: number | null;
+  queried_at: string | null;
+}
+
 /** One spec-version transition from /api/v1/runtime (#4316/3.1). */
 export interface RuntimeTransition {
   spec_version: number | null;
