@@ -774,6 +774,11 @@ const LEADERBOARD_BOARD_KEYS: LeaderboardBoardKey[] = [
   "most-complete",
   "most-enriched",
   "fastest-growing",
+  "most-reliable",
+  "open-slots",
+  "cheapest-registration",
+  "highest-emission",
+  "validator-headroom",
 ];
 
 function normalizeLeaderboardRow(raw: unknown): LeaderboardRow | null {
@@ -782,6 +787,7 @@ function normalizeLeaderboardRow(raw: unknown): LeaderboardRow | null {
   if (typeof r.netuid !== "number") return null;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
   const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const bool = (v: unknown) => (typeof v === "boolean" ? v : undefined);
   return {
     netuid: r.netuid,
     slug: str(r.slug),
@@ -795,6 +801,19 @@ function normalizeLeaderboardRow(raw: unknown): LeaderboardRow | null {
     surface_count: num(r.surface_count),
     operational_interface_count: num(r.operational_interface_count),
     completeness_delta: num(r.completeness_delta),
+    score: num(r.score),
+    grade: str(r.grade),
+    sample_count: num(r.sample_count),
+    open_slots: num(r.open_slots),
+    max_uids: num(r.max_uids),
+    registration_cost_tao: num(r.registration_cost_tao),
+    registration_allowed: bool(r.registration_allowed),
+    emission_share: num(r.emission_share),
+    total_stake_tao: num(r.total_stake_tao),
+    validator_count: num(r.validator_count),
+    miner_count: num(r.miner_count),
+    validator_headroom: num(r.validator_headroom),
+    max_validators: num(r.max_validators),
   };
 }
 
@@ -810,9 +829,12 @@ function normalizeLeaderboards(raw: unknown): Leaderboards {
   return out;
 }
 
-// #1111: registry leaderboards — five live, D1-computed boards (healthiest,
-// fastest-rpc, most-complete, most-enriched, fastest-growing). One artifact carries
-// all boards; the homepage discovery module renders the top rows of each.
+// #1111: registry leaderboards — live, D1-computed boards. Six operational
+// (healthiest, fastest-rpc, most-complete, most-enriched, fastest-growing,
+// most-reliable) and four economic-opportunity (open-slots,
+// cheapest-registration, highest-emission, validator-headroom). One artifact
+// carries all boards; the homepage discovery module renders the top rows of a
+// subset, and /leaderboards surfaces them all (#6995).
 function normalizeSubnetMover(raw: unknown): SubnetMover | null {
   if (!isRecord(raw)) return null;
   const netuid = coerceFiniteNumber(raw.netuid);
