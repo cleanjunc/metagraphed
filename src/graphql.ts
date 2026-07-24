@@ -45,6 +45,7 @@ import { loadEndpointIncidentsList } from "./endpoint-incidents-mcp.ts";
 // same loadProviderEndpointsList that MCP list_provider_endpoints already calls
 // (#3289) -- not a reimplementation.
 import { loadProviderEndpointsList } from "./provider-endpoints-mcp.ts";
+import { loadSubnetEndpointsList } from "./subnet-endpoints-mcp.ts";
 // #7167: GraphQL parity for the /api/v1/review/* contributor-review family,
 // reusing each list_* MCP loader unchanged (same artifact read, filter, sort,
 // and page logic REST and MCP already use) -- not a reimplementation.
@@ -638,6 +639,8 @@ export const SDL = `
     surfaces(netuid: Int, limit: Int, cursor: String): SurfaceList!
     "Endpoint/resource registry, optionally scoped to one subnet."
     endpoints(netuid: Int, limit: Int, cursor: String): EndpointList!
+    "One subnet's endpoint/resource registry with the full REST filter/sort/page set, read from that subnet's own endpoint snapshot. Filter by kind/layer/publication_state/status, threshold with min_/max_latency_ms and min_/max_score, sort with sort/order, and page with limit (1-100)/cursor. An invalid filter/sort/enum or a bad cursor is a GraphQL error, not a silently substituted default. cursor is an Int offset (matching the list_subnet_endpoints MCP tool and the loader's numeric-cursor check; the issue's literal String would fail that check). Returns the opaque JSON list envelope (endpoints[] + pagination), the per-subnet companion of the root endpoints field. Mirrors GET /api/v1/subnets/{netuid}/endpoints."
+    subnet_endpoints(netuid: Int!, kind: String, layer: String, publication_state: String, status: String, min_latency_ms: Int, max_latency_ms: Int, min_score: Float, max_score: Float, sort: String, order: String, limit: Int, cursor: Int): JSON
     "Generalized endpoint pool scores -- each pool's kind, eligible/total endpoint count, and probe-derived routing score. Filter by id/kind, threshold with min_/max_eligible_count and min_/max_endpoint_count, sort with sort/order, and page with limit (1-100)/cursor. An invalid filter/sort/limit/cursor is a GraphQL error, not a silently substituted default. Mirrors GET /api/v1/endpoint-pools."
     endpoint_pools(id: String, kind: String, min_eligible_count: Float, max_eligible_count: Float, min_endpoint_count: Float, max_endpoint_count: Float, sort: String, order: String, fields: String, limit: Int, cursor: Int): PoolList!
     "The load-balanced Bittensor RPC pool scores -- the RPC-specific predecessor of endpoint_pools (#6570): same pools[] row shape and filter/sort/page surface, with a live 15-minute cron eligibility overlay applied before filtering/sorting. An invalid filter/sort/limit/cursor is a GraphQL error, not a silently substituted default. Mirrors GET /api/v1/rpc/pools."
@@ -895,8 +898,8 @@ export const SDL = `
     economics: SubnetEconomics
     "Curated public interface surfaces of this subnet."
     surfaces: [Surface!]!
-    "Endpoint/resource registry rows for this subnet."
-    endpoints: [Endpoint!]!
+    "Endpoint/resource registry rows for this subnet. With no arguments it returns the subnet's full endpoint list unchanged; supplying any of the same filter/sort/page arguments as the root subnet_endpoints field routes through the same loader and returns the filtered rows."
+    endpoints(kind: String, layer: String, publication_state: String, status: String, min_latency_ms: Int, max_latency_ms: Int, min_score: Float, max_score: Float, sort: String, order: String, limit: Int, cursor: Int): [Endpoint!]!
   }
 
   type ProviderList {
@@ -4238,6 +4241,7 @@ export const FIELD_COMPLEXITY = {
   surfaces: RELATIONSHIP_FIELD_COMPLEXITY,
   endpoints: RELATIONSHIP_FIELD_COMPLEXITY,
   endpoint_pools: RELATIONSHIP_FIELD_COMPLEXITY,
+  subnet_endpoints: RELATIONSHIP_FIELD_COMPLEXITY,
   rpc_pools: RELATIONSHIP_FIELD_COMPLEXITY,
   endpoint_incidents: RELATIONSHIP_FIELD_COMPLEXITY,
   source_snapshots: RELATIONSHIP_FIELD_COMPLEXITY,
@@ -4819,7 +4823,8 @@ function subnetNode(identity: Row, prefetch: Row = {}) {
     economics: (_args: unknown, context: GqlContext) =>
       loadSubnetEconomics(context, netuid),
     surfaces: bundledOr(prefetch.surfaces, loadSubnetSurfaces),
-    endpoints: bundledOr(prefetch.endpoints, loadSubnetEndpoints),
+    endpoints: (args: Row, context: GqlContext) =>
+      loadSubnetEndpointsNested(context, netuid, args, prefetch.endpoints),
   };
 }
 
@@ -4948,6 +4953,40 @@ function loadSubnetSurfaces(context: GqlContext, netuid: number) {
 
 function loadSubnetEndpoints(context: GqlContext, netuid: number) {
   return loadRows(context, ARTIFACT.endpoints, "endpoints", netuid);
+}
+
+// #7869: the nested Subnet.endpoints resolver. With no filter/page arguments it
+// preserves the existing behavior exactly -- a bundled prefetch list (a null
+// bundle resolves to an empty list) or the loadSubnetEndpoints/loadRows path --
+// so unfiltered queries and their tests are unchanged. When ANY argument is
+// supplied it routes through loadSubnetEndpointsList (the same subnet-endpoints-mcp
+// loader the root subnet_endpoints field and list_subnet_endpoints MCP tool use),
+// returning only its endpoints rows to satisfy the [Endpoint!]! shape. A
+// cold/absent per-subnet snapshot or an invalid filter degrades to an empty list
+// rather than erroring the parent Subnet query -- the same schema-stable
+// convention Provider.endpoints (loadProviderEndpoints) follows.
+async function loadSubnetEndpointsNested(
+  context: GqlContext,
+  netuid: number,
+  args: Row,
+  prefetched: Row[] | undefined,
+) {
+  const hasQuery = args != null && Object.keys(args).length > 0;
+  if (!hasQuery) {
+    return prefetched !== undefined
+      ? (prefetched ?? [])
+      : loadSubnetEndpoints(context, netuid);
+  }
+  try {
+    const result = await loadSubnetEndpointsList(
+      mcpCtx(context),
+      { ...args, netuid },
+      { readArtifact },
+    );
+    return result.endpoints;
+  } catch {
+    return [];
+  }
 }
 
 async function loadProviderSubnets(context: GqlContext, netuids: number[]) {
@@ -6337,6 +6376,16 @@ const rootValue = {
   // default" convention.
   endpoint_pools(args: Row, context: GqlContext) {
     return loadEndpointPoolsList(mcpCtx(context), args, { readArtifact });
+  },
+
+  // #7869: the per-subnet endpoint list, reusing subnet-endpoints-mcp.ts's
+  // loadSubnetEndpointsList (the same loader list_subnet_endpoints /
+  // GET /api/v1/subnets/{netuid}/endpoints call) unchanged -- it validates
+  // netuid + every filter/sort/enum/cursor and throws on an invalid one, which
+  // the executor surfaces as a normal GraphQL error. Returns the full JSON
+  // envelope (endpoints[] + pagination), matching the MCP/REST shape.
+  subnet_endpoints(args: Row, context: GqlContext) {
+    return loadSubnetEndpointsList(mcpCtx(context), args, { readArtifact });
   },
 
   rpc_pools(args: Row, context: GqlContext) {
