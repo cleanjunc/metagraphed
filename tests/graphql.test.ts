@@ -8870,6 +8870,114 @@ describe("graphql — subnet_event_summary (#6980, chain-event activity summary)
   });
 });
 
+describe("graphql — subnet_endpoints (#7869, per-subnet endpoint list + nested filters)", () => {
+  const SUBNET_ENDPOINTS_BLOB = {
+    generated_at: "2026-07-01T00:00:00.000Z",
+    netuid: 7,
+    endpoints: [
+      {
+        id: "allways-api",
+        netuid: 7,
+        kind: "subnet-api",
+        layer: "bittensor-base",
+        provider: "allways",
+        status: "ok",
+        latency_ms: 120,
+        score: 92,
+        pool_eligible: true,
+      },
+      {
+        id: "allways-openapi",
+        netuid: 7,
+        kind: "openapi",
+        layer: "bittensor-base",
+        provider: "allways",
+        status: "degraded",
+        latency_ms: 450,
+        score: 70,
+        pool_eligible: false,
+      },
+    ],
+  };
+
+  test("root subnet_endpoints applies a filter and returns the JSON list envelope (#7869)", async () => {
+    const env = fixtureEnv({
+      "/metagraph/endpoints/7.json": SUBNET_ENDPOINTS_BLOB,
+    });
+    const { status, body } = await gql(
+      `{ subnet_endpoints(netuid: 7, kind: "subnet-api") }`,
+      env as unknown as Env,
+    );
+    assert.equal(status, 200);
+    assert.equal(body.errors, undefined);
+    assert.equal(body.data.subnet_endpoints.netuid, 7);
+    assert.equal(body.data.subnet_endpoints.returned, 1);
+    assert.equal(body.data.subnet_endpoints.endpoints.length, 1);
+    assert.equal(body.data.subnet_endpoints.endpoints[0].kind, "subnet-api");
+  });
+
+  test("root subnet_endpoints sorts + pages, exposing pagination meta (#7869)", async () => {
+    const env = fixtureEnv({
+      "/metagraph/endpoints/7.json": SUBNET_ENDPOINTS_BLOB,
+    });
+    const { status, body } = await gql(
+      `{ subnet_endpoints(netuid: 7, sort: "score", order: "desc", limit: 1) }`,
+      env as unknown as Env,
+    );
+    assert.equal(status, 200);
+    assert.equal(body.errors, undefined);
+    assert.equal(body.data.subnet_endpoints.total, 2);
+    assert.equal(body.data.subnet_endpoints.returned, 1);
+    assert.equal(body.data.subnet_endpoints.next_cursor, 1);
+  });
+
+  test("root subnet_endpoints surfaces a bad cursor as a GraphQL error, not a substituted default (#7869)", async () => {
+    const env = fixtureEnv({
+      "/metagraph/endpoints/7.json": SUBNET_ENDPOINTS_BLOB,
+    });
+    const { status, body } = await gql(
+      `{ subnet_endpoints(netuid: 7, cursor: -1) }`,
+      env as unknown as Env,
+    );
+    assert.equal(status, 200);
+    assert.ok(body.errors, "expected a GraphQL error for a negative cursor");
+    assert.match(body.errors[0].message, /cursor/i);
+  });
+
+  test("nested Subnet.endpoints applies a filter via the same loader (#7869)", async () => {
+    const env = fixtureEnv({
+      "/metagraph/subnets/7.json": { subnet: { netuid: 7, name: "Allways" } },
+      "/metagraph/endpoints/7.json": SUBNET_ENDPOINTS_BLOB,
+    });
+    const { status, body } = await gql(
+      `{ subnet(netuid: 7) { endpoints(kind: "subnet-api") { id kind } } }`,
+      env as unknown as Env,
+    );
+    assert.equal(status, 200);
+    assert.equal(body.errors, undefined);
+    assert.equal(body.data.subnet.endpoints.length, 1);
+    assert.equal(body.data.subnet.endpoints[0].id, "allways-api");
+    assert.equal(body.data.subnet.endpoints[0].kind, "subnet-api");
+  });
+
+  test("nested Subnet.endpoints with a filter degrades to an empty list when the per-subnet snapshot is cold (#7869)", async () => {
+    const env = fixtureEnv({
+      "/metagraph/subnets/7.json": { subnet: { netuid: 7, name: "Allways" } },
+    });
+    const { status, body } = await gql(
+      `{ subnet(netuid: 7) { endpoints(status: "ok") { id } } }`,
+      env as unknown as Env,
+    );
+    assert.equal(status, 200);
+    assert.equal(body.errors, undefined);
+    assert.deepEqual(body.data.subnet.endpoints, []);
+  });
+
+  test("subnet_endpoints is weighted as a fan-out field (#7869)", () => {
+    assert.equal(FIELD_COMPLEXITY.subnet_endpoints, 5);
+  });
+});
+
 describe("graphql — subnet_gaps / subnet_evidence (#6980, baked review artifacts)", () => {
   test("subnet_gaps resolves the baked gap report", async () => {
     const env = fixtureEnv({
