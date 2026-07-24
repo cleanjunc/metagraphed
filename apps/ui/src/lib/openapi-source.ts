@@ -42,7 +42,7 @@ const ID_OVERRIDES: Record<string, string> = {
   openapi: "OpenAPI",
 };
 
-function humanizeOperationId(id: string): string {
+export function humanizeOperationId(id: string): string {
   if (ID_OVERRIDES[id]) return ID_OVERRIDES[id];
   return id
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
