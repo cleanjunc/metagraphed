@@ -506,7 +506,7 @@ export const SDL = /* GraphQL */ `
     incidents(window: String): GlobalIncidents!
     "The get_global_incidents-aligned name for the same global downtime-incident ledger (#7643): identical 7d/30d window validation, tier fallback, and cold-tier degradation as incidents — a thin alias so MCP tool names and GraphQL fields line up. Distinct from endpoint_incidents (the active endpoint failure/degradation feed, GET /api/v1/endpoint-incidents): this is the historical incident ledger. Returns the typed GlobalIncidents envelope rather than the issue's literal JSON suggestion, matching incidents. Mirrors GET /api/v1/incidents."
     global_incidents(window: String): GlobalIncidents!
-    "Recent-extrinsic feed (newest first), optionally filtered. Mirrors GET /api/v1/extrinsics."
+    "Recent-extrinsic feed (newest first), optionally filtered. Optionally narrow by call_hash, block (exact height), block_start/block_end (inclusive height range), or from/to (observed_at epoch-ms range — String args because epoch-ms exceeds GraphQL Int's 32-bit range, matching account_history) — the same filters GET /api/v1/extrinsics and the list_extrinsics MCP tool accept. Mirrors GET /api/v1/extrinsics."
     extrinsics(
       limit: Int
       offset: Int
@@ -516,6 +516,11 @@ export const SDL = /* GraphQL */ `
       call_module: String
       call_function: String
       success: Boolean
+      call_hash: String
+      block_start: Int
+      block_end: Int
+      from: String
+      to: String
     ): ExtrinsicList!
     "Paginated all-events feed (newest first) from the Postgres-backed all-events tier: each event's block, event index, pallet, method, decoded args, phase, and emitting extrinsic index. Filter by pallet/method/block/extrinsic; page with limit (1-200, default 50) and the opaque keyset cursor (or legacy before=block_number). An invalid filter combo is a GraphQL BAD_USER_INPUT error; a cold/unbound tier resolves to a schema-stable empty feed, never a GraphQL error. Reads the raw all-events tier -- distinct from account_events/subnet_events (the curated account-attributed streams, a different data source) and from Subscription.chainEvents (live WebSocket firehose). Mirrors GET /api/v1/chain-events."
     chain_events(
