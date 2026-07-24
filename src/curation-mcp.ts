@@ -10,6 +10,7 @@ export const CURATION_ARTIFACT = "/metagraph/curation.json";
 
 const CURATION_SORT_FIELDS = API_QUERY_COLLECTIONS.curation.sort_fields;
 const COVERAGE_LEVELS = QUERY_ENUMS.coverageLevel;
+const CURATION_LEVELS = QUERY_ENUMS.curationLevel;
 
 export interface CurationMcpError extends Error {
   toolError: true;
@@ -74,6 +75,10 @@ export function curationQueryUrl(
   const coverageLevel = optionalEnum(args, "coverage_level", COVERAGE_LEVELS);
   if (coverageLevel) {
     url.searchParams.set("coverage_level", coverageLevel);
+  }
+  const curationLevel = optionalEnum(args, "curation_level", CURATION_LEVELS);
+  if (curationLevel) {
+    url.searchParams.set("curation_level", curationLevel);
   }
   const sort = optionalEnum(args, "sort", CURATION_SORT_FIELDS);
   if (sort) url.searchParams.set("sort", sort);
@@ -190,8 +195,8 @@ export const LIST_CURATION_MCP_TOOL = {
   description:
     "Fetch per-subnet curation states from the registry: coverage_level, " +
     "curation_level, source counts, and review posture for every active subnet. " +
-    "Filter by netuid or coverage_level, sort with sort + order, and page with " +
-    "limit (1-100) / cursor. Mirrors GET /api/v1/curation.",
+    "Filter by netuid, coverage_level, or curation_level, sort with sort + " +
+    "order, and page with limit (1-100) / cursor. Mirrors GET /api/v1/curation.",
   inputSchema: {
     type: "object",
     properties: {
@@ -205,6 +210,11 @@ export const LIST_CURATION_MCP_TOOL = {
         enum: COVERAGE_LEVELS,
         description:
           "Filter by coverage depth: native-only, manifested, or probed.",
+      },
+      curation_level: {
+        type: "string",
+        enum: CURATION_LEVELS,
+        description: "Filter by curation level.",
       },
       sort: {
         type: "string",

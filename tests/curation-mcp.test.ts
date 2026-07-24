@@ -54,6 +54,7 @@ describe("curation-mcp", () => {
     const url = curationQueryUrl({
       netuid: 7,
       coverage_level: "probed",
+      curation_level: "adapter-backed",
       sort: "netuid",
       order: "desc",
       limit: 10,
@@ -61,6 +62,7 @@ describe("curation-mcp", () => {
     });
     assert.equal(url.searchParams.get("netuid"), "7");
     assert.equal(url.searchParams.get("coverage_level"), "probed");
+    assert.equal(url.searchParams.get("curation_level"), "adapter-backed");
     assert.equal(url.searchParams.get("sort"), "netuid");
     assert.equal(url.searchParams.get("limit"), "10");
     assert.equal(url.searchParams.get("cursor"), "5");
@@ -69,6 +71,13 @@ describe("curation-mcp", () => {
   test("curationQueryUrl rejects invalid coverage_level", () => {
     assert.throws(
       () => curationQueryUrl({ coverage_level: "bogus" }),
+      (err: Row) => err.code === "invalid_params",
+    );
+  });
+
+  test("curationQueryUrl rejects invalid curation_level", () => {
+    assert.throws(
+      () => curationQueryUrl({ curation_level: "bogus" }),
       (err: Row) => err.code === "invalid_params",
     );
   });
@@ -142,6 +151,16 @@ describe("curation-mcp", () => {
     assert.equal(out.returned, 1);
     assert.equal(out.curation[0].netuid, 7);
     assert.equal(out.curation[0].coverage_level, "probed");
+  });
+
+  test("loadCurationList filters by curation_level", async () => {
+    const out = await loadCurationList(
+      { env: mockEnv(), readArtifact: readArtifact as ReadArtifact },
+      { curation_level: "adapter-backed" },
+    );
+    assert.equal(out.returned, 1);
+    assert.equal(out.curation[0].netuid, 31);
+    assert.equal(out.curation[0].curation_level, "adapter-backed");
   });
 
   test("loadCurationList sorts and pages the collection", async () => {
