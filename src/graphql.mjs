@@ -828,8 +828,8 @@ export const SDL = `
     evm_address(h160: String!): EvmAddressMapping
     "The get_evm_address_mapping-aligned name for evm_address, so the MCP tool name and this Query field line up. Structurally identical to evm_address -- same live RPC read, same validation, same schema-stable null on an unresolved mapping -- not a second lookup. Mirrors GET /api/v1/evm/address/{h160}."
     evm_address_mapping(h160: String!): EvmAddressMapping
-    "Recent Sudo-pallet extrinsic feed (newest first): the chain's superuser governance calls, the same shape as the extrinsics feed with call_module fixed to Sudo (so no signer/call_module args). Mirrors GET /api/v1/sudo."
-    sudo(limit: Int, offset: Int, cursor: String, block: Int, call_function: String, success: Boolean): ExtrinsicList!
+    "Recent Sudo-pallet extrinsic feed (newest first): the chain's superuser governance calls, the same shape as the extrinsics feed with call_module fixed to Sudo (so no signer/call_module args). Optionally narrow by block (exact height), block_start/block_end (inclusive height range), or from/to (observed_at epoch-ms range — String args because epoch-ms exceeds GraphQL Int's 32-bit range, matching account_history) — the same block/time filters GET /api/v1/sudo and the get_sudo MCP tool accept. Mirrors GET /api/v1/sudo."
+    sudo(limit: Int, offset: Int, cursor: String, block: Int, block_start: Int, block_end: Int, from: String, to: String, call_function: String, success: Boolean): ExtrinsicList!
   }
 
   type SubnetList {
@@ -7076,7 +7076,18 @@ const rootValue = {
   },
 
   async sudo(
-    { limit, offset, cursor, block, call_function: callFunction, success },
+    {
+      limit,
+      offset,
+      cursor,
+      block,
+      block_start: blockStart,
+      block_end: blockEnd,
+      from,
+      to,
+      call_function: callFunction,
+      success,
+    },
     context,
   ) {
     // The Sudo governance feed is the /extrinsics feed with call_module fixed
@@ -7094,6 +7105,14 @@ const rootValue = {
     params.set("offset", String(safeOffset));
     if (cursor) params.set("cursor", cursor);
     if (block != null) params.set("block", String(block));
+    // #7874: block_start/block_end (inclusive height range) and from/to
+    // (observed_at epoch-ms range) forwarded straight through to the same
+    // /api/v1/sudo route get_sudo uses. from/to are String args (epoch-ms
+    // overflows GraphQL Int's 32 bits), matching account_history's from/to.
+    if (blockStart != null) params.set("block_start", String(blockStart));
+    if (blockEnd != null) params.set("block_end", String(blockEnd));
+    if (from != null) params.set("from", from);
+    if (to != null) params.set("to", to);
     if (callFunction) params.set("call_function", callFunction);
     if (success != null) params.set("success", String(success));
     const data =
